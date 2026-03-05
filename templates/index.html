@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Puissance 4 PRO - Clone Web Complet</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Verdana, Geneva, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #fff;
+        }
+
+        h1 {
+            margin: 15px 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            font-size: 2.2em;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 25px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            margin-bottom: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        label {
+            font-weight: bold;
+            font-size: 0.85em;
+            color: #555;
+        }
+
+        select, button, input[type="range"] {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 2px solid #667eea;
+            font-family: Verdana, sans-serif;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        select {
+            background: white;
+            min-width: 160px;
+        }
+
+        select:hover {
+            border-color: #764ba2;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: bold;
+            border: none;
+            padding: 10px 20px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        button.pause-btn {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        button.pause-btn.paused {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        button.history-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        }
+
+        .depth-display {
+            font-weight: bold;
+            color: #667eea;
+            min-width: 25px;
+            text-align: center;
+        }
+
+        input[type="range"] {
+            width: 100px;
+            padding: 5px;
+            cursor: pointer;
+        }
+
+        #status {
+            background: rgba(255, 255, 255, 0.95);
+            color: #333;
+            padding: 12px 25px;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            min-width: 300px;
+            text-align: center;
+        }
+
+        /* Scores Minimax au-dessus de la grille */
+        #scores-container {
+            display: grid;
+            grid-template-columns: repeat(9, 60px);
+            gap: 8px;
+            margin-bottom: 5px;
+            padding: 0 20px;
+        }
+
+        .score-cell {
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75em;
+            font-weight: bold;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+
+        .score-cell.positive {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .score-cell.negative {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .score-cell.best {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            color: #000;
+            font-size: 0.85em;
+            box-shadow: 0 0 10px rgba(251, 191, 36, 0.8);
+        }
+
+        #board {
+            background: linear-gradient(180deg, #2563eb 0%, #1e40af 100%);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.4);
+            display: grid;
+            grid-template-columns: repeat(9, 60px);
+            grid-template-rows: repeat(8, 60px);
+            gap: 8px;
+        }
+
+        .cell {
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 3px solid rgba(255, 255, 255, 0.2);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cell:hover:not(.player1):not(.player2) {
+            background: rgba(255, 255, 255, 0.35);
+            transform: scale(1.1);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        .cell.player1 {
+            background: radial-gradient(circle, #ef4444 0%, #dc2626 100%);
+            border-color: #991b1b;
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+        }
+
+        .cell.player2 {
+            background: radial-gradient(circle, #fbbf24 0%, #f59e0b 100%);
+            border-color: #b45309;
+            box-shadow: 0 0 15px rgba(251, 191, 36, 0.6);
+        }
+
+        .cell.winning {
+            animation: winPulse 0.8s ease-in-out infinite;
+            box-shadow: 0 0 25px rgba(255, 255, 255, 0.9) !important;
+            border-color: #fff !important;
+        }
+
+        @keyframes winPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+        }
+
+        @keyframes dropToken {
+            0% { transform: translateY(-500px); }
+            60% { transform: translateY(10px); }
+            80% { transform: translateY(-5px); }
+            100% { transform: translateY(0); }
+        }
+
+        .cell.dropping {
+            animation: dropToken 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 0.85em;
+            opacity: 0.8;
+        }
+
+        .paused-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .paused-overlay.visible {
+            display: flex;
+        }
+
+        .paused-message {
+            background: white;
+            padding: 40px 60px;
+            border-radius: 20px;
+            text-align: center;
+            color: #333;
+        }
+
+        .paused-message h2 {
+            font-size: 2em;
+            margin-bottom: 20px;
+            color: #f59e0b;
+        }
+
+        .paused-message button {
+            margin-top: 20px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            font-weight: bold;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 10px;
+            font-size: 1.1em;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .paused-message button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.6);
+        }
+    </style>
+</head>
+<body>
+    <h1>🎮 Puissance 4 PRO</h1>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="gameMode">Mode de jeu</label>
+            <select id="gameMode">
+                <option value="pvp">Joueur vs Joueur</option>
+                <option value="pvai" selected>Joueur vs IA</option>
+                <option value="aivai">IA vs IA</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="aiType">Type d'IA</label>
+            <select id="aiType">
+                <option value="random">Facile (Aléatoire)</option>
+                <option value="minimax" selected>Difficile (Minimax)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="depthRange">Profondeur: <span id="depthValue" class="depth-display">4</span></label>
+            <input type="range" id="depthRange" min="1" max="6" value="4">
+        </div>
+
+        <button id="newGameBtn">🎲 Nouvelle Partie</button>
+        <button id="pauseBtn" class="pause-btn">⏸️ Pause</button>
+        <a href="/historique"><button type="button" class="history-btn">📜 Historique</button></a>
+    </div>
+
+    <div id="status">Cliquez sur "Nouvelle Partie" pour commencer !</div>
+
+    <!-- Affichage des scores Minimax -->
+    <div id="scores-container"></div>
+
+    <div id="board"></div>
+
+    <div class="footer">
+        <p>🚀 Clone complet du jeu local | Flask + Python + JavaScript | Soutenance PRO</p>
+    </div>
+
+    <!-- Overlay de pause -->
+    <div id="pauseOverlay" class="paused-overlay">
+        <div class="paused-message">
+            <h2>⏸️ PAUSE</h2>
+            <p>La partie est en pause</p>
+            <button id="resumeBtn" onclick="togglePause()">▶️ Reprendre</button>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // CONFIGURATION - Clone exact du jeu local (src/utils/constants.py)
+        // ============================================================
+        const ROWS = 8;      // Identique à src/utils/constants.py
+        const COLS = 9;      // Identique à src/utils/constants.py
+        const EMPTY = 0;
+        const PLAYER1 = 1;   // Rouge
+        const PLAYER2 = 2;   // Jaune
+        const WIN_LENGTH = 4;
+
+        // ============================================================
+        // ÉTAT DU JEU
+        // ============================================================
+        let grid = [];
+        let currentPlayer = PLAYER1;
+        let gameMode = 'pvai';
+        let aiType = 'minimax';
+        let aiDepth = 4;
+        let gameActive = false;
+        let isAIThinking = false;
+        let isPaused = false;
+        let moveHistory = [];        // Historique des coups pour sauvegarde BDD
+        let lastColumnScores = {};   // Derniers scores Minimax calculés
+        let pendingAIAction = null;  // Action IA en attente (pour reprise après pause)
+
+        // ============================================================
+        // ÉLÉMENTS DOM
+        // ============================================================
+        const boardElement = document.getElementById('board');
+        const statusElement = document.getElementById('status');
+        const scoresContainer = document.getElementById('scores-container');
+        const gameModeSelect = document.getElementById('gameMode');
+        const aiTypeSelect = document.getElementById('aiType');
+        const depthRange = document.getElementById('depthRange');
+        const depthValue = document.getElementById('depthValue');
+        const newGameBtn = document.getElementById('newGameBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const pauseOverlay = document.getElementById('pauseOverlay');
+
+        // ============================================================
+        // INITIALISATION DU PLATEAU
+        // ============================================================
+        function initBoard() {
+            // Réinitialisation complète
+            grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
+            currentPlayer = PLAYER1;
+            gameActive = true;
+            isAIThinking = false;
+            isPaused = false;
+            moveHistory = [];
+            lastColumnScores = {};
+            pendingAIAction = null;
+
+            // Mise à jour UI
+            pauseBtn.textContent = '⏸️ Pause';
+            pauseBtn.classList.remove('paused');
+            pauseOverlay.classList.remove('visible');
+
+            renderBoard();
+            renderScores({});
+            updateStatus();
+
+            console.log(`🎮 Nouvelle partie - Mode: ${gameMode}, IA: ${aiType}, Profondeur: ${aiDepth}`);
+
+            // Si mode IA vs IA, démarrer automatiquement
+            if (gameMode === 'aivai') {
+                setTimeout(() => playAIVsAITurn(), 800);
+            }
+        }
+
+        // ============================================================
+        // RENDU VISUEL DU PLATEAU
+        // ============================================================
+        function renderBoard() {
+            boardElement.innerHTML = '';
+            boardElement.style.gridTemplateRows = `repeat(${ROWS}, 60px)`;
+            boardElement.style.gridTemplateColumns = `repeat(${COLS}, 60px)`;
+
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+
+                    if (grid[row][col] === PLAYER1) {
+                        cell.classList.add('player1');
+                    } else if (grid[row][col] === PLAYER2) {
+                        cell.classList.add('player2');
+                    }
+
+                    cell.addEventListener('click', () => handleCellClick(col));
+                    boardElement.appendChild(cell);
+                }
+            }
+        }
+
+        // ============================================================
+        // AFFICHAGE DES SCORES MINIMAX (XAI)
+        // ============================================================
+        function renderScores(scores) {
+            scoresContainer.innerHTML = '';
+            scoresContainer.style.gridTemplateColumns = `repeat(${COLS}, 60px)`;
+
+            // Trouver le meilleur score
+            let bestScore = -Infinity;
+            let bestCol = -1;
+            for (const [col, score] of Object.entries(scores)) {
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestCol = parseInt(col);
+                }
+            }
+
+            for (let col = 0; col < COLS; col++) {
+                const scoreCell = document.createElement('div');
+                scoreCell.className = 'score-cell';
+
+                if (scores.hasOwnProperty(col)) {
+                    const score = scores[col];
+                    scoreCell.textContent = score >= 0 ? `+${score}` : score;
+
+                    if (col === bestCol) {
+                        scoreCell.classList.add('best');
+                        scoreCell.textContent = `★${score}`;
+                    } else if (score > 0) {
+                        scoreCell.classList.add('positive');
+                    } else if (score < 0) {
+                        scoreCell.classList.add('negative');
+                    }
+                } else {
+                    scoreCell.textContent = '-';
+                }
+
+                scoresContainer.appendChild(scoreCell);
+            }
+
+            lastColumnScores = scores;
+        }
+
+        // ============================================================
+        // GESTION DES CLICS UTILISATEUR
+        // ============================================================
+        function handleCellClick(col) {
+            console.log(`🖱️ Clic colonne ${col} | gameActive=${gameActive}, isPaused=${isPaused}, isAIThinking=${isAIThinking}`);
+
+            // Blocages
+            if (!gameActive || isPaused || isAIThinking) {
+                console.log('⛔ Clic ignoré');
+                return;
+            }
+
+            // En mode PvAI : joueur humain = PLAYER1 uniquement
+            if (gameMode === 'pvai' && currentPlayer === PLAYER2) {
+                console.log('⛔ Clic ignoré : tour de l\'IA');
+                return;
+            }
+
+            // En mode IA vs IA : pas de clic manuel
+            if (gameMode === 'aivai') {
+                console.log('⛔ Clic ignoré : mode IA vs IA');
+                return;
+            }
+
+            // Effacer les scores (c'est le tour de l'humain)
+            renderScores({});
+
+            // Jouer le coup
+            dropToken(col, currentPlayer);
+        }
+
+        // ============================================================
+        // PLACEMENT D'UN JETON (avec gravité)
+        // ============================================================
+        function dropToken(col, player) {
+            // Vérification colonne pleine (sommet = row 0 visuellement)
+            if (grid[0][col] !== EMPTY) {
+                updateStatus('❌ Colonne pleine !');
+                return false;
+            }
+
+            // Trouver la ligne la plus basse disponible
+            // Convention web : row 0 = haut visuel, row ROWS-1 = bas visuel
+            let row = ROWS - 1;
+            while (row >= 0 && grid[row][col] !== EMPTY) {
+                row--;
+            }
+
+            if (row < 0) return false;
+
+            // Placer le jeton
+            grid[row][col] = player;
+
+            // Enregistrer dans l'historique
+            moveHistory.push(col);
+            console.log(`✅ Coup joué : joueur ${player} -> colonne ${col} (row ${row})`);
+            console.log(`📜 Historique : ${moveHistory.join('')}`);
+
+            // Animation de chute
+            const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+            if (cell) {
+                cell.classList.add('dropping');
+                cell.classList.add(player === PLAYER1 ? 'player1' : 'player2');
+            }
+
+            // Vérifier victoire après animation
+            setTimeout(() => {
+                checkWinCondition();
+            }, 550);
+
+            return true;
+        }
+
+        // ============================================================
+        // VÉRIFICATION DE VICTOIRE VIA API (utilise Board.check_win)
+        // ============================================================
+        async function checkWinCondition() {
+            try {
+                const response = await fetch('/api/check_win', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ grid })
+                });
+
+                const result = await response.json();
+
+                if (result.game_over) {
+                    gameActive = false;
+
+                    if (result.winner) {
+                        const winnerName = result.winner === PLAYER1 ? 'Joueur 1 (Rouge 🔴)' : 'Joueur 2 (Jaune 🟡)';
+                        updateStatus(`🏆 ${winnerName} a gagné !`);
+                        highlightWinningLine(result.winning_line);
+                    } else if (result.is_draw) {
+                        updateStatus('🤝 Égalité - Plateau plein !');
+                    }
+
+                    // Sauvegarde automatique en BDD (avec winning_line !)
+                    saveGameToDatabase(result.winner, result.winning_line);
+                } else {
+                    // Partie continue : changer de joueur
+                    switchPlayer();
+                }
+            } catch (error) {
+                console.error('❌ Erreur check_win:', error);
+                updateStatus('❌ Erreur de connexion au serveur');
+            }
+        }
+
+        // ============================================================
+        // SAUVEGARDE EN BASE DE DONNÉES
+        // ============================================================
+        async function saveGameToDatabase(winner, winningLine = null) {
+            try {
+                const gagnant = winner === null ? 0 : winner;
+                const historique = moveHistory.join('');
+                
+                // IMPORTANT: Envoyer winning_line stringifié pour la BDD
+                const ligneGagnante = winningLine ? JSON.stringify(winningLine) : null;
+
+                console.log(`💾 Sauvegarde BDD: gagnant=${gagnant}, historique=${historique}`);
+                console.log(`📍 Ligne gagnante:`, ligneGagnante);
+
+                const response = await fetch('/api/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        gagnant: gagnant,
+                        historique_coups: historique,
+                        ligne_gagnante: ligneGagnante
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    console.log(`✅ Partie sauvegardée (ID: ${result.id})`);
+                } else {
+                    console.warn('⚠️ Sauvegarde échouée:', result.error);
+                }
+            } catch (error) {
+                console.error('❌ Erreur sauvegarde BDD:', error);
+            }
+        }
+
+        // ============================================================
+        // SURLIGNAGE DES JETONS GAGNANTS
+        // ============================================================
+        function highlightWinningLine(winningLine) {
+            if (!winningLine || winningLine.length === 0) return;
+
+            winningLine.forEach(pos => {
+                const cell = document.querySelector(`[data-row="${pos.row}"][data-col="${pos.col}"]`);
+                if (cell) {
+                    cell.classList.add('winning');
+                }
+            });
+        }
+
+        // ============================================================
+        // CHANGEMENT DE JOUEUR
+        // ============================================================
+        function switchPlayer() {
+            currentPlayer = currentPlayer === PLAYER1 ? PLAYER2 : PLAYER1;
+            updateStatus();
+
+            // Si mode PvAI et c'est le tour de l'IA
+            if (gameMode === 'pvai' && currentPlayer === PLAYER2 && gameActive) {
+                if (!isPaused) {
+                    setTimeout(() => playAIMove(), 600);
+                } else {
+                    pendingAIAction = 'aiMove';
+                }
+            }
+        }
+
+        // ============================================================
+        // COUP DE L'IA (PvAI mode)
+        // ============================================================
+        async function playAIMove() {
+            if (!gameActive || isAIThinking || isPaused) return;
+
+            isAIThinking = true;
+            updateStatus('🤖 L\'IA réfléchit...');
+
+            try {
+                const response = await fetch('/api/get_ai_move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grid,
+                        ai_type: aiType,
+                        player: currentPlayer,
+                        depth: aiDepth
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Afficher les scores Minimax
+                    if (result.column_scores && Object.keys(result.column_scores).length > 0) {
+                        renderScores(result.column_scores);
+                    }
+
+                    isAIThinking = false;
+
+                    // Vérifier si en pause pendant la réflexion
+                    if (isPaused) {
+                        pendingAIAction = { type: 'drop', column: result.column };
+                        return;
+                    }
+
+                    dropToken(result.column, currentPlayer);
+                } else {
+                    throw new Error(result.error || 'Erreur IA');
+                }
+            } catch (error) {
+                console.error('❌ Erreur IA:', error);
+                updateStatus('❌ Erreur lors du coup de l\'IA');
+                isAIThinking = false;
+                gameActive = false;
+            }
+        }
+
+        // ============================================================
+        // MODE IA VS IA (boucle automatique)
+        // ============================================================
+        async function playAIVsAITurn() {
+            if (!gameActive || isPaused) {
+                if (isPaused) pendingAIAction = 'aiVsAi';
+                return;
+            }
+
+            isAIThinking = true;
+            const iaName = currentPlayer === PLAYER1 ? 'IA Rouge 🔴' : 'IA Jaune 🟡';
+            updateStatus(`🤖 ${iaName} réfléchit...`);
+
+            try {
+                const response = await fetch('/api/get_ai_move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grid,
+                        ai_type: aiType,
+                        player: currentPlayer,
+                        depth: aiDepth
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Afficher les scores
+                    if (result.column_scores && Object.keys(result.column_scores).length > 0) {
+                        renderScores(result.column_scores);
+                    }
+
+                    isAIThinking = false;
+
+                    if (isPaused) {
+                        pendingAIAction = { type: 'aiVsAiDrop', column: result.column };
+                        return;
+                    }
+
+                    dropToken(result.column, currentPlayer);
+
+                    // Continuer la boucle si partie active
+                    // (checkWinCondition appellera switchPlayer qui ne relance pas en mode aivai)
+                    setTimeout(() => {
+                        if (gameActive && gameMode === 'aivai' && !isPaused) {
+                            playAIVsAITurn();
+                        }
+                    }, 1200);
+                } else {
+                    throw new Error(result.error);
+                }
+            } catch (error) {
+                console.error('❌ Erreur IA vs IA:', error);
+                updateStatus('❌ Erreur dans le mode IA vs IA');
+                isAIThinking = false;
+                gameActive = false;
+            }
+        }
+
+        // ============================================================
+        // GESTION DE LA PAUSE
+        // ============================================================
+        function togglePause() {
+            if (!gameActive) return;
+
+            isPaused = !isPaused;
+
+            if (isPaused) {
+                pauseBtn.textContent = '▶️ Reprendre';
+                pauseBtn.classList.add('paused');
+                pauseOverlay.classList.add('visible');
+                updateStatus('⏸️ Partie en pause');
+            } else {
+                pauseBtn.textContent = '⏸️ Pause';
+                pauseBtn.classList.remove('paused');
+                pauseOverlay.classList.remove('visible');
+                updateStatus();
+
+                // Reprendre l'action en attente
+                if (pendingAIAction) {
+                    if (pendingAIAction === 'aiMove') {
+                        pendingAIAction = null;
+                        setTimeout(() => playAIMove(), 300);
+                    } else if (pendingAIAction === 'aiVsAi') {
+                        pendingAIAction = null;
+                        setTimeout(() => playAIVsAITurn(), 300);
+                    } else if (pendingAIAction.type === 'drop') {
+                        const col = pendingAIAction.column;
+                        pendingAIAction = null;
+                        dropToken(col, currentPlayer);
+                    } else if (pendingAIAction.type === 'aiVsAiDrop') {
+                        const col = pendingAIAction.column;
+                        pendingAIAction = null;
+                        dropToken(col, currentPlayer);
+                        setTimeout(() => {
+                            if (gameActive && gameMode === 'aivai') playAIVsAITurn();
+                        }, 1200);
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // MISE À JOUR DU STATUT
+        // ============================================================
+        function updateStatus(message = null) {
+            if (message) {
+                statusElement.textContent = message;
+                return;
+            }
+
+            if (!gameActive) {
+                return; // Garder le message de fin de partie
+            }
+
+            if (isPaused) {
+                statusElement.textContent = '⏸️ Partie en pause';
+                return;
+            }
+
+            if (gameMode === 'pvp') {
+                const playerName = currentPlayer === PLAYER1 ? 'Rouge 🔴' : 'Jaune 🟡';
+                statusElement.textContent = `Tour du Joueur ${currentPlayer} (${playerName})`;
+            } else if (gameMode === 'pvai') {
+                if (currentPlayer === PLAYER1) {
+                    statusElement.textContent = '🎮 Votre tour (Rouge 🔴)';
+                } else {
+                    statusElement.textContent = '🤖 Tour de l\'IA (Jaune 🟡)';
+                }
+            } else if (gameMode === 'aivai') {
+                const iaName = currentPlayer === PLAYER1 ? 'Rouge' : 'Jaune';
+                statusElement.textContent = `🤖 Mode IA vs IA - ${iaName} joue`;
+            }
+        }
+
+        // ============================================================
+        // ÉVÉNEMENTS
+        // ============================================================
+        newGameBtn.addEventListener('click', () => {
+            gameMode = gameModeSelect.value;
+            aiType = aiTypeSelect.value;
+            aiDepth = parseInt(depthRange.value);
+            initBoard();
+        });
+
+        pauseBtn.addEventListener('click', togglePause);
+
+        depthRange.addEventListener('input', (e) => {
+            aiDepth = parseInt(e.target.value);
+            depthValue.textContent = aiDepth;
+        });
+
+        // ============================================================
+        // INITIALISATION AU CHARGEMENT
+        // ============================================================
+        window.addEventListener('DOMContentLoaded', () => {
+            gameMode = gameModeSelect.value;
+            aiType = aiTypeSelect.value;
+            aiDepth = parseInt(depthRange.value);
+            depthValue.textContent = aiDepth;
+
+            // Afficher le plateau vide
+            renderBoard();
+            renderScores({});
+        });
+    </script>
+</body>
+</html>

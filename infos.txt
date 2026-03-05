@@ -1,0 +1,9 @@
+Hôte (Host) : Ressemble généralement à mysql-metuscarnel.alwaysdata.net
+
+Utilisateur (User) : metuscarnel.
+
+Mot de passe (Password) : $Maestro137#.
+
+Nom de la base (Database name) : metuscarnel_connect4
+
+Port : 3306.
