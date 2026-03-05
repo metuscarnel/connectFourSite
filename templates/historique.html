@@ -184,6 +184,26 @@
             color: #6b7280;
         }
 
+        .btn-replay {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            font-weight: bold;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 0.85em;
+            box-shadow: 0 3px 10px rgba(16, 185, 129, 0.4);
+            transition: all 0.3s ease;
+            display: inline-block;
+        }
+
+        .btn-replay:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(16, 185, 129, 0.6);
+        }
+
         .footer {
             margin-top: 30px;
             text-align: center;
@@ -225,6 +245,7 @@
                     <th>Gagnant</th>
                     <th>Historique des coups</th>
                     <th>Date</th>
+                    <th>Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -242,14 +263,23 @@
                     </td>
                     <td><span class="historique-coups">{{ partie.historique_coups or '-' }}</span></td>
                     <td>{{ partie.date_partie if partie.date_partie else '-' }}</td>
+                    <td>
+                        <a href="/replay/{{ partie.id }}" class="btn-replay">▶️ Revoir</a>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
         {% else %}
         <div class="no-data">
+            {% if db_error %}
+            <p style="color: #e53e3e;">⚠️ Erreur de connexion à la base de données :</p>
+            <p style="color: #666; font-size: 0.9em; margin-top: 10px;">{{ db_error }}</p>
+            <p style="margin-top: 15px;">Vérifiez les variables d'environnement : DB_HOST, DB_USER, DB_PASS, DB_NAME</p>
+            {% else %}
             <p>🎲 Aucune partie enregistrée pour le moment.</p>
             <p style="margin-top: 10px;">Jouez des parties et elles apparaîtront ici !</p>
+            {% endif %}
         </div>
         {% endif %}
     </div>

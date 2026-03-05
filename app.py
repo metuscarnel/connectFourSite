@@ -320,21 +320,43 @@ class RandomAI:
 
 
 # ============================================================
-# CLASSE DATABASE MANAGER (intégré depuis src/utils/db_manager.py)
+# CONFIGURATION BASE DE DONNÉES (variables d'environnement)
+# ============================================================
+# Valeurs par défaut pour le développement local
+DB_HOST = os.getenv('DB_HOST', 'mysql-metuscarnel.alwaysdata.net')
+DB_USER = os.getenv('DB_USER', 'metuscarnel')
+# Supporte DB_PASS (Render) OU DB_PASSWORD (legacy)
+DB_PASS = os.getenv('DB_PASS') or os.getenv('DB_PASSWORD', '$Maestro137#')
+DB_NAME = os.getenv('DB_NAME', 'metuscarnel_connect4')
+DB_PORT = int(os.getenv('DB_PORT', '3306'))
+
+# Log de configuration au démarrage (sans mot de passe !)
+print(f"\n{'='*50}")
+print("📊 Configuration Base de Données:")
+print(f"   Hôte: {DB_HOST}")
+print(f"   User: {DB_USER}")
+print(f"   Base: {DB_NAME}")
+print(f"   Port: {DB_PORT}")
+print(f"{'='*50}\n")
+
+
+# ============================================================
+# CLASSE DATABASE MANAGER
 # ============================================================
 class DatabaseManager:
     """Gestionnaire de connexion MySQL pour AlwaysData."""
     
     def __init__(self):
         self.connection = None
-        self.host = os.environ.get('DB_HOST', 'mysql-metuscarnel.alwaysdata.net')
-        self.user = os.environ.get('DB_USER', 'metuscarnel')
-        self.password = os.environ.get('DB_PASSWORD', '$Maestro137#')
-        self.database = os.environ.get('DB_NAME', 'metuscarnel_connect4')
-        self.port = int(os.environ.get('DB_PORT', 3306))
+        self.host = DB_HOST
+        self.user = DB_USER
+        self.password = DB_PASS
+        self.database = DB_NAME
+        self.port = DB_PORT
     
     def connect(self) -> bool:
         """Établit la connexion à la base de données."""
+        print(f"[DB] Tentative de connexion à l'hôte: {self.host}...")
         try:
             import mysql.connector
             self.connection = mysql.connector.connect(
@@ -342,11 +364,13 @@ class DatabaseManager:
                 user=self.user,
                 password=self.password,
                 database=self.database,
-                port=self.port
+                port=self.port,
+                connect_timeout=10
             )
+            print(f"[DB] ✅ Connexion réussie à {self.database}")
             return True
         except Exception as e:
-            print(f"[DB ERROR] Connexion échouée: {e}")
+            print(f"[DB ERROR] ❌ Connexion échouée: {e}")
             return False
     
     def disconnect(self):
@@ -426,17 +450,26 @@ class DatabaseManager:
 # ============================================================
 app = Flask(__name__)
 
-# Configuration BDD via variables d'environnement (défaut pour dev local)
-os.environ.setdefault('DB_HOST', 'mysql-metuscarnel.alwaysdata.net')
-os.environ.setdefault('DB_USER', 'metuscarnel')
-os.environ.setdefault('DB_PASSWORD', '$Maestro137#')
-os.environ.setdefault('DB_NAME', 'metuscarnel_connect4')
-os.environ.setdefault('DB_PORT', '3306')
-
 # Instances globales
 db_manager = DatabaseManager()
 minimax_ai = MinimaxAI(depth=4, name="Minimax Web")
 random_ai = RandomAI(name="Random Web")
+
+
+def init_db():
+    """
+    Initialise la base de données au démarrage.
+    Crée la table 'games' si elle n'existe pas.
+    """
+    print("[DB] Initialisation de la base de données...")
+    if db_manager.connect():
+        try:
+            db_manager.create_tables()
+            print("[DB] ✅ Table 'games' vérifiée/créée")
+        finally:
+            db_manager.disconnect()
+    else:
+        print("[DB] ⚠️ Initialisation BDD échouée - L'app continue sans BDD")
 
 
 @app.route('/')
@@ -655,6 +688,7 @@ def save_game():
 def historique():
     """Affiche l'historique des parties."""
     parties = []
+    db_error = None
     
     try:
         if db_manager.connect():
@@ -671,12 +705,17 @@ def historique():
                         partie['gagnant'] = 'Nul'
                     partie['historique_coups'] = coups
                     partie['date_partie'] = partie.get('created_at')
+                print(f"[HISTORIQUE] {len(parties)} parties récupérées")
             finally:
                 db_manager.disconnect()
+        else:
+            db_error = f"Impossible de se connecter à {DB_HOST}"
+            print(f"[HISTORIQUE ERROR] {db_error}")
     except Exception as e:
+        db_error = str(e)
         print(f"[HISTORIQUE ERROR] {e}")
     
-    return render_template('historique.html', parties=parties)
+    return render_template('historique.html', parties=parties, db_error=db_error)
 
 
 @app.route('/replay/<int:game_id>')
@@ -715,14 +754,22 @@ def replay(game_id):
     return render_template('index.html', replay_mode=True, moves=moves, game_id=game_id, winning_line=winning_line_base0, error=error)
 
 
+# ============================================================
+# POINT D'ENTRÉE
+# ============================================================
 if __name__ == '__main__':
-    print("=" * 50)
+    print("\n" + "=" * 50)
     print("🎮 Puissance 4 Web PRO - Serveur AUTONOME")
     print("=" * 50)
     print(f"Configuration: {ROWS} lignes x {COLS} colonnes")
     print("Routes: /, /health, /historique, /replay/<id>")
     print("APIs: /api/get_ai_move, /api/check_win, /api/save")
-    print("=" * 50)
+    print("=" * 50 + "\n")
     
-    port = int(os.environ.get('PORT', 5001))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Initialisation BDD au démarrage
+    init_db()
+    
+    port = int(os.getenv('PORT', '5001'))
+    debug_mode = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
+    print(f"\n🚀 Démarrage sur le port {port} (debug={debug_mode})\n")
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
