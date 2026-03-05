@@ -290,10 +290,118 @@
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(16, 185, 129, 0.6);
         }
+
+        /* ============================================================
+           MODE REPLAY - Panneau de contrôle
+           ============================================================ */
+        .replay-panel {
+            display: none;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            padding: 15px 25px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(16, 185, 129, 0.4);
+            margin-bottom: 15px;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            color: white;
+        }
+
+        .replay-panel.active {
+            display: flex;
+        }
+
+        .replay-title {
+            font-weight: bold;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .replay-info {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 8px 15px;
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+
+        .replay-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .replay-btn {
+            background: white;
+            color: #059669;
+            font-weight: bold;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .replay-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .replay-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .replay-btn.quit {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+        }
+
+        .replay-btn.auto {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+
+        .replay-btn.auto.playing {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .replay-progress {
+            background: rgba(255, 255, 255, 0.3);
+            height: 6px;
+            border-radius: 3px;
+            width: 150px;
+            overflow: hidden;
+        }
+
+        .replay-progress-bar {
+            background: white;
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body>
     <h1>🎮 Puissance 4 PRO</h1>
+
+    <!-- Panneau Mode Replay (affiché uniquement en mode replay) -->
+    <div id="replayPanel" class="replay-panel">
+        <span class="replay-title">🎬 MODE REPLAY</span>
+        <span class="replay-info">Partie #<span id="replayGameId">-</span></span>
+        <span class="replay-info">Coup <span id="replayCurrentMove">0</span> / <span id="replayTotalMoves">0</span></span>
+        <div class="replay-progress">
+            <div id="replayProgressBar" class="replay-progress-bar"></div>
+        </div>
+        <div class="replay-buttons">
+            <button id="replayPrevBtn" class="replay-btn" onclick="replayPrev()">⏮️ Précédent</button>
+            <button id="replayAutoBtn" class="replay-btn auto" onclick="replayAutoPlay()">▶️ Auto</button>
+            <button id="replayNextBtn" class="replay-btn" onclick="replayNext()">⏭️ Suivant</button>
+            <button id="replayQuitBtn" class="replay-btn quit" onclick="replayQuit()">✖️ Quitter</button>
+        </div>
+    </div>
 
     <div class="controls">
         <div class="control-group">
@@ -357,7 +465,8 @@
         // ============================================================
         // ÉTAT DU JEU
         // ============================================================
-        let grid = [];
+        // Initialisation immédiate de la grille (évite l'erreur "Cannot read properties of undefined")
+        let grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
         let currentPlayer = PLAYER1;
         let gameMode = 'pvai';
         let aiType = 'minimax';
@@ -368,6 +477,17 @@
         let moveHistory = [];        // Historique des coups pour sauvegarde BDD
         let lastColumnScores = {};   // Derniers scores Minimax calculés
         let pendingAIAction = null;  // Action IA en attente (pour reprise après pause)
+
+        // ============================================================
+        // ÉTAT MODE REPLAY (clone du système local src/)
+        // ============================================================
+        let isReplayMode = false;
+        let replayMoves = '';        // Chaîne des coups à rejouer (ex: "4534562")
+        let replayCurrentIndex = 0;  // Position actuelle dans le replay
+        let replayGameId = null;     // ID de la partie rejouée
+        let replayWinningLine = null; // Ligne gagnante à afficher à la fin
+        let replayAutoInterval = null; // Intervalle pour lecture auto
+        let replaySpeed = 700;       // Vitesse en ms (700ms entre chaque coup)
 
         // ============================================================
         // ÉLÉMENTS DOM
@@ -382,6 +502,16 @@
         const newGameBtn = document.getElementById('newGameBtn');
         const pauseBtn = document.getElementById('pauseBtn');
         const pauseOverlay = document.getElementById('pauseOverlay');
+
+        // Éléments Mode Replay
+        const replayPanel = document.getElementById('replayPanel');
+        const replayGameIdSpan = document.getElementById('replayGameId');
+        const replayCurrentMoveSpan = document.getElementById('replayCurrentMove');
+        const replayTotalMovesSpan = document.getElementById('replayTotalMoves');
+        const replayProgressBar = document.getElementById('replayProgressBar');
+        const replayPrevBtn = document.getElementById('replayPrevBtn');
+        const replayNextBtn = document.getElementById('replayNextBtn');
+        const replayAutoBtn = document.getElementById('replayAutoBtn');
 
         // ============================================================
         // INITIALISATION DU PLATEAU
@@ -418,6 +548,12 @@
         // RENDU VISUEL DU PLATEAU
         // ============================================================
         function renderBoard() {
+            // SÉCURITÉ : Vérifier que la grille existe et est valide
+            if (!grid || !grid[0]) {
+                console.warn('⚠️ renderBoard: grille non initialisée, initialisation...');
+                grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
+            }
+            
             boardElement.innerHTML = '';
             boardElement.style.gridTemplateRows = `repeat(${ROWS}, 60px)`;
             boardElement.style.gridTemplateColumns = `repeat(${COLS}, 60px)`;
@@ -429,9 +565,9 @@
                     cell.dataset.row = row;
                     cell.dataset.col = col;
 
-                    if (grid[row][col] === PLAYER1) {
+                    if (grid[row] && grid[row][col] === PLAYER1) {
                         cell.classList.add('player1');
-                    } else if (grid[row][col] === PLAYER2) {
+                    } else if (grid[row] && grid[row][col] === PLAYER2) {
                         cell.classList.add('player2');
                     }
 
@@ -488,9 +624,16 @@
         // GESTION DES CLICS UTILISATEUR
         // ============================================================
         function handleCellClick(col) {
-            console.log(`🖱️ Clic colonne ${col} | gameActive=${gameActive}, isPaused=${isPaused}, isAIThinking=${isAIThinking}`);
+            console.log(`🖱️ Clic colonne ${col} | gameActive=${gameActive}, isPaused=${isPaused}, isAIThinking=${isAIThinking}, isReplayMode=${isReplayMode}`);
 
-            // Blocages
+            // Blocage Mode Replay
+            if (isReplayMode) {
+                console.log('⛔ Clic ignoré : mode Replay actif');
+                updateStatus('🎬 Mode Replay - Utilisez les boutons de navigation');
+                return;
+            }
+
+            // Blocages standards
             if (!gameActive || isPaused || isAIThinking) {
                 console.log('⛔ Clic ignoré');
                 return;
@@ -863,6 +1006,272 @@
         });
 
         // ============================================================
+        // FONCTIONS MODE REPLAY (clone du système local src/)
+        // ============================================================
+        
+        /**
+         * Initialise le mode Replay avec les coups d'une partie
+         * @param {string} moves - Chaîne des coups (colonnes 0-8)
+         * @param {number} gameId - ID de la partie
+         * @param {Array|null} winningLine - Ligne gagnante [{row, col}, ...]
+         */
+        function initReplayMode(moves, gameId, winningLine = null) {
+            console.log(`🎬 Initialisation Replay - Partie #${gameId} : ${moves.length} coups`);
+            console.log(`🏆 Ligne gagnante:`, winningLine);
+            
+            // DEBUG: Vérifier que le panneau existe
+            console.log('DEBUG: replayPanel =', replayPanel);
+            if (!replayPanel) {
+                alert('ERREUR: Panneau replay non trouvé !');
+                return;
+            }
+            
+            isReplayMode = true;
+            replayMoves = moves;
+            replayCurrentIndex = 0;
+            replayGameId = gameId;
+            replayWinningLine = winningLine; // Stocker la ligne gagnante
+            gameActive = false;
+            
+            // Réinitialiser la grille
+            grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
+            currentPlayer = PLAYER1;
+            moveHistory = [];
+            
+            // Afficher le panneau replay
+            replayPanel.classList.add('active');
+            console.log('DEBUG: Classes du panneau:', replayPanel.classList);
+            
+            // Masquer les contrôles de jeu normal
+            const controlsDiv = document.querySelector('.controls');
+            if (controlsDiv) {
+                controlsDiv.style.display = 'none';
+            }
+            
+            // Mettre à jour l'affichage
+            if (replayGameIdSpan) replayGameIdSpan.textContent = gameId;
+            if (replayTotalMovesSpan) replayTotalMovesSpan.textContent = moves.length;
+            updateReplayUI();
+            
+            renderBoard();
+            renderScores({});
+            updateStatus(`🎬 Replay Partie #${gameId} - Appuyez sur Suivant pour commencer`);
+        }
+        
+        /**
+         * Joue le coup suivant dans le replay
+         */
+        function replayNext() {
+            if (!isReplayMode || replayCurrentIndex >= replayMoves.length) {
+                console.log('⛔ Fin du replay atteinte');
+                updateStatus('🏁 Fin de la partie !');
+                return;
+            }
+            
+            const col = parseInt(replayMoves[replayCurrentIndex]);
+            const player = replayCurrentIndex % 2 === 0 ? PLAYER1 : PLAYER2;
+            
+            // Jouer le coup (sans vérification de victoire, juste le placement)
+            replayDropToken(col, player);
+            
+            replayCurrentIndex++;
+            moveHistory.push(col);
+            
+            updateReplayUI();
+            
+            const playerName = player === PLAYER1 ? 'Rouge 🔴' : 'Jaune 🟡';
+            
+            // Vérifier si c'est le dernier coup - afficher la ligne gagnante
+            if (replayCurrentIndex >= replayMoves.length && replayWinningLine) {
+                highlightWinningLine(replayWinningLine);
+                updateStatus(`🏆 Fin de la partie ! ${playerName} gagne !`);
+            } else {
+                updateStatus(`🎬 Coup ${replayCurrentIndex}/${replayMoves.length} - ${playerName} joue colonne ${col + 1}`);
+            }
+            
+            console.log(`▶️ Replay: coup ${replayCurrentIndex} - ${playerName} col ${col}`);
+        }
+        
+        /**
+         * Annule le dernier coup (Undo)
+         */
+        function replayPrev() {
+            if (!isReplayMode || replayCurrentIndex <= 0) {
+                console.log('⛔ Début du replay atteint');
+                updateStatus('🎬 Début de la partie');
+                return;
+            }
+            
+            // Si on était à la fin, retirer le highlight de la ligne gagnante
+            if (replayCurrentIndex >= replayMoves.length) {
+                document.querySelectorAll('.cell.winning').forEach(cell => {
+                    cell.classList.remove('winning');
+                });
+            }
+            
+            replayCurrentIndex--;
+            const col = parseInt(replayMoves[replayCurrentIndex]);
+            
+            // Trouver la ligne la plus haute occupée dans cette colonne
+            let row = 0;
+            while (row < ROWS && grid[row][col] === EMPTY) {
+                row++;
+            }
+            
+            if (row < ROWS) {
+                // Vider la case
+                grid[row][col] = EMPTY;
+                moveHistory.pop();
+                
+                // Mettre à jour l'affichage
+                const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                if (cell) {
+                    cell.classList.remove('player1', 'player2', 'winning', 'dropping');
+                }
+            }
+            
+            updateReplayUI();
+            
+            const playerName = replayCurrentIndex % 2 === 0 ? 'Rouge 🔴' : 'Jaune 🟡';
+            updateStatus(`🎬 Coup ${replayCurrentIndex}/${replayMoves.length} - Tour de ${playerName}`);
+            
+            console.log(`⏮️ Replay: retour au coup ${replayCurrentIndex}`);
+        }
+        
+        /**
+         * Place un jeton en mode replay (sans vérification de victoire)
+         */
+        function replayDropToken(col, player) {
+            // Trouver la ligne la plus basse disponible
+            let row = ROWS - 1;
+            while (row >= 0 && grid[row][col] !== EMPTY) {
+                row--;
+            }
+            
+            if (row < 0) return false;
+            
+            grid[row][col] = player;
+            
+            // Animation
+            const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+            if (cell) {
+                cell.classList.add('dropping');
+                cell.classList.add(player === PLAYER1 ? 'player1' : 'player2');
+            }
+            
+            return true;
+        }
+        
+        /**
+         * Met à jour l'interface du mode replay
+         */
+        function updateReplayUI() {
+            replayCurrentMoveSpan.textContent = replayCurrentIndex;
+            
+            // Barre de progression
+            const progress = replayMoves.length > 0 
+                ? (replayCurrentIndex / replayMoves.length) * 100 
+                : 0;
+            replayProgressBar.style.width = `${progress}%`;
+            
+            // État des boutons
+            replayPrevBtn.disabled = replayCurrentIndex <= 0;
+            replayNextBtn.disabled = replayCurrentIndex >= replayMoves.length;
+        }
+        
+        /**
+         * Lance/Arrête la lecture automatique de tous les coups
+         */
+        function replayAutoPlay() {
+            // Si déjà en cours, arrêter
+            if (replayAutoInterval) {
+                clearInterval(replayAutoInterval);
+                replayAutoInterval = null;
+                replayAutoBtn.textContent = '▶️ Auto';
+                replayAutoBtn.classList.remove('playing');
+                updateStatus(`🎬 Lecture automatique arrêtée (coup ${replayCurrentIndex}/${replayMoves.length})`);
+                console.log('⏹️ Auto-play arrêté');
+                return;
+            }
+            
+            // Si fin atteinte, recommencer depuis le début
+            if (replayCurrentIndex >= replayMoves.length) {
+                // Reset complet
+                replayCurrentIndex = 0;
+                grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
+                moveHistory = [];
+                renderBoard();
+                updateReplayUI();
+            }
+            
+            // Lancer la lecture automatique
+            replayAutoBtn.textContent = '⏸️ Pause';
+            replayAutoBtn.classList.add('playing');
+            updateStatus(`🎬 Lecture automatique en cours...`);
+            console.log('▶️ Auto-play démarré');
+            
+            replayAutoInterval = setInterval(() => {
+                if (replayCurrentIndex >= replayMoves.length) {
+                    // Fin atteinte, arrêter et afficher ligne gagnante
+                    clearInterval(replayAutoInterval);
+                    replayAutoInterval = null;
+                    replayAutoBtn.textContent = '🔄 Rejouer';
+                    replayAutoBtn.classList.remove('playing');
+                    
+                    // Mettre en évidence la ligne gagnante
+                    if (replayWinningLine) {
+                        highlightWinningLine(replayWinningLine);
+                        const winner = (replayMoves.length % 2 === 1) ? 'Rouge 🔴' : 'Jaune 🟡';
+                        updateStatus(`🏆 Victoire ${winner} ! (${replayMoves.length} coups)`);
+                    } else {
+                        updateStatus(`🏁 Fin de la partie ! (${replayMoves.length} coups)`);
+                    }
+                    console.log('✅ Auto-play terminé');
+                    return;
+                }
+                
+                // Jouer le coup suivant
+                replayNext();
+            }, replaySpeed);
+        }
+        
+        /**
+         * Quitte le mode Replay et revient au jeu normal
+         */
+        function replayQuit() {
+            console.log('🚪 Sortie du mode Replay');
+            
+            // Arrêter l'auto-play si en cours
+            if (replayAutoInterval) {
+                clearInterval(replayAutoInterval);
+                replayAutoInterval = null;
+            }
+            
+            isReplayMode = false;
+            replayMoves = '';
+            replayCurrentIndex = 0;
+            replayGameId = null;
+            
+            // Masquer le panneau replay
+            replayPanel.classList.remove('active');
+            
+            // Réafficher les contrôles
+            document.querySelector('.controls').style.display = 'flex';
+            
+            // Réinitialiser
+            grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
+            moveHistory = [];
+            gameActive = false;
+            
+            renderBoard();
+            renderScores({});
+            updateStatus('Cliquez sur "Nouvelle Partie" pour commencer !');
+            
+            // Redirection vers l'accueil
+            window.location.href = '/';
+        }
+
+        // ============================================================
         // INITIALISATION AU CHARGEMENT
         // ============================================================
         window.addEventListener('DOMContentLoaded', () => {
@@ -874,6 +1283,20 @@
             // Afficher le plateau vide
             renderBoard();
             renderScores({});
+            
+            // Détection du mode Replay (passé par Flask via Jinja2)
+            {% if replay_mode %}
+            const replayMovesFromServer = "{{ moves|default('') }}";
+            const replayGameIdFromServer = {{ game_id|default(0) }};
+            const replayWinningLineFromServer = {{ winning_line|tojson|default('null') }};
+            
+            if (replayMovesFromServer && replayMovesFromServer.length > 0) {
+                console.log('🎬 Mode Replay détecté depuis le serveur');
+                initReplayMode(replayMovesFromServer, replayGameIdFromServer, replayWinningLineFromServer);
+            } else {
+                updateStatus('⚠️ Erreur : Aucun coup à rejouer');
+            }
+            {% endif %}
         });
     </script>
 </body>
