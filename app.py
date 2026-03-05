@@ -330,12 +330,17 @@ DB_PASS = os.getenv('DB_PASS') or os.getenv('DB_PASSWORD', '$Maestro137#')
 DB_NAME = os.getenv('DB_NAME', 'metuscarnel_connect4')
 DB_PORT = int(os.getenv('DB_PORT', '3306'))
 
+# Détection source des variables (env ou défaut)
+def _get_var_source(var_name, default):
+    return '✅ ENV' if os.getenv(var_name) else '⚠️ DEFAULT'
+
 # Log de configuration au démarrage (sans mot de passe !)
 print(f"\n{'='*50}")
 print("📊 Configuration Base de Données:")
-print(f"   Hôte: {DB_HOST}")
-print(f"   User: {DB_USER}")
-print(f"   Base: {DB_NAME}")
+print(f"   Hôte: {DB_HOST} [{_get_var_source('DB_HOST', 'mysql-metuscarnel.alwaysdata.net')}]")
+print(f"   User: {DB_USER} [{_get_var_source('DB_USER', '')}]")
+print(f"   Pass: {'*' * len(DB_PASS)} [{_get_var_source('DB_PASS', '') if os.getenv('DB_PASS') else _get_var_source('DB_PASSWORD', '')}]")
+print(f"   Base: {DB_NAME} [{_get_var_source('DB_NAME', '')}]")
 print(f"   Port: {DB_PORT}")
 print(f"{'='*50}\n")
 
@@ -482,6 +487,44 @@ def index():
 def health():
     """Endpoint de santé."""
     return jsonify({"status": "ok", "message": "Puissance 4 Web est opérationnel!"})
+
+
+@app.route('/health/db')
+def health_db():
+    """
+    Endpoint de diagnostic pour la connexion BDD.
+    Affiche la configuration (sans mot de passe) et teste la connexion.
+    """
+    config = {
+        "host": DB_HOST,
+        "user": DB_USER,
+        "database": DB_NAME,
+        "port": DB_PORT,
+        "password_length": len(DB_PASS),
+        "env_vars": {
+            "DB_HOST": '✅ SET' if os.getenv('DB_HOST') else '❌ NOT SET',
+            "DB_USER": '✅ SET' if os.getenv('DB_USER') else '❌ NOT SET',
+            "DB_PASS": '✅ SET' if os.getenv('DB_PASS') else '❌ NOT SET',
+            "DB_PASSWORD": '✅ SET' if os.getenv('DB_PASSWORD') else '❌ NOT SET',
+            "DB_NAME": '✅ SET' if os.getenv('DB_NAME') else '❌ NOT SET',
+        }
+    }
+    
+    # Test de connexion
+    try:
+        if db_manager.connect():
+            cursor = db_manager.connection.cursor()
+            cursor.execute('SELECT COUNT(*) FROM games')
+            count = cursor.fetchone()[0]
+            cursor.close()
+            db_manager.disconnect()
+            config["connection"] = f"✅ OK - {count} parties"
+        else:
+            config["connection"] = "❌ FAILED"
+    except Exception as e:
+        config["connection"] = f"❌ ERROR: {str(e)}"
+    
+    return jsonify(config)
 
 
 @app.route('/api/get_ai_move', methods=['POST'])
