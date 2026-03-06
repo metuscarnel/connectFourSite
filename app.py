@@ -19,6 +19,7 @@ from typing import Optional, Tuple, List
 from copy import deepcopy
 from flask import Flask, render_template, request, jsonify
 import numpy as np
+import joblib
 
 # ============================================================
 # CONSTANTES DU JEU (intégrées depuis src/utils/constants.py)
@@ -320,6 +321,162 @@ class RandomAI:
 
 
 # ============================================================
+# IA HYBRIDE (réflexe logique + modèle ML)
+# ============================================================
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'ai_model.joblib')
+ml_model = None
+
+
+def load_ml_model():
+    """Charge le modèle ML depuis le disque (cache mémoire)."""
+    global ml_model
+    if ml_model is not None:
+        return ml_model
+
+    if not os.path.exists(MODEL_PATH):
+        print(f"[ML] ⚠️ Modèle introuvable: {MODEL_PATH}")
+        return None
+
+    try:
+        ml_model = joblib.load(MODEL_PATH)
+        print(f"[ML] ✅ Modèle chargé: {MODEL_PATH}")
+        return ml_model
+    except Exception as e:
+        print(f"[ML ERROR] Chargement modèle impossible: {e}")
+        return None
+
+
+def board_to_ml_features(board: Board, player: int) -> np.ndarray:
+    """
+    Encode le plateau pour le modèle.
+    Vue relative au joueur courant: 1 = mes pions, -1 = adversaire, 0 = vide.
+    """
+    opponent = PLAYER1 if player == PLAYER2 else PLAYER2
+    mapped = np.where(
+        board.grid == player,
+        1,
+        np.where(board.grid == opponent, -1, 0)
+    )
+    return mapped.astype(np.int8).flatten()
+
+
+def check_mandatory_moves(board: Board, player: int) -> Optional[int]:
+    """Retourne un coup vital: gagner maintenant ou bloquer l'adversaire."""
+    valid_locations = board.get_valid_locations()
+    if not valid_locations:
+        return None
+
+    opponent = PLAYER1 if player == PLAYER2 else PLAYER2
+
+    # 1) Coup gagnant immédiat
+    for col in valid_locations:
+        row = board.get_next_open_row(col)
+        if row is None:
+            continue
+        temp = board.copy()
+        temp.drop_piece(row, col, player)
+        if temp.check_win(player):
+            return col
+
+    # 2) Blocage immédiat de l'adversaire
+    for col in valid_locations:
+        row = board.get_next_open_row(col)
+        if row is None:
+            continue
+        temp = board.copy()
+        temp.drop_piece(row, col, opponent)
+        if temp.check_win(opponent):
+            return col
+
+    return None
+
+
+def predict_move_with_model(board: Board, player: int) -> Tuple[Optional[int], dict]:
+    """Prédit la meilleure colonne avec le modèle ML (sans arbre Minimax)."""
+    valid_locations = board.get_valid_locations()
+    if not valid_locations:
+        return None, {}
+
+    model = load_ml_model()
+    if model is None:
+        return random_ai.get_move(board), {}
+
+    features = board_to_ml_features(board, player)
+    expected_features = getattr(model, 'n_features_in_', None)
+    if expected_features is not None and features.shape[0] != expected_features:
+        print(
+            f"[ML WARNING] Dimensions incompatibles modèle/plateau: "
+            f"{features.shape[0]} != {expected_features}"
+        )
+        return random_ai.get_move(board), {}
+
+    x_input = features.reshape(1, -1)
+
+    # Scores de colonnes (probabilités de classes)
+    column_scores = {col: 0 for col in valid_locations}
+    try:
+        if hasattr(model, 'predict_proba'):
+            proba = model.predict_proba(x_input)[0]
+            classes = model.classes_
+            for cls, p in zip(classes, proba):
+                col = int(cls)
+                if col in column_scores:
+                    column_scores[col] = float(p)
+
+            best_col = max(column_scores, key=column_scores.get)
+            return best_col, column_scores
+
+        pred_col = int(model.predict(x_input)[0])
+        if pred_col in valid_locations:
+            return pred_col, column_scores
+        return random_ai.get_move(board), column_scores
+    except Exception as e:
+        print(f"[ML ERROR] Prédiction impossible: {e}")
+        return random_ai.get_move(board), {}
+
+
+def predict_move_with_minimax(board: Board, player: int, depth: int) -> Tuple[Optional[int], dict]:
+    """Prédit la meilleure colonne avec Minimax (calcul d'arbre local)."""
+    valid_locations = board.get_valid_locations()
+    if not valid_locations:
+        return None, {}
+
+    minimax_ai.depth = max(1, int(depth))
+    minimax_ai.set_player(player)
+
+    best_score = float('-inf')
+    best_column = valid_locations[0]
+    column_scores: dict = {}
+
+    for col in valid_locations:
+        row = board.get_next_open_row(col)
+        if row is None:
+            continue
+
+        temp_board = board.copy()
+        temp_board.drop_piece(row, col, player)
+
+        if temp_board.check_win(player):
+            score = 100000
+        else:
+            _, score = minimax_ai.minimax(
+                temp_board,
+                minimax_ai.depth - 1,
+                float('-inf'),
+                float('inf'),
+                False,
+            )
+
+        score = int(score)
+        column_scores[col] = score
+        if score > best_score:
+            best_score = score
+            best_column = col
+
+    return best_column, column_scores
+
+
+# ============================================================
 # CONFIGURATION BASE DE DONNÉES (variables d'environnement)
 # ============================================================
 # Valeurs par défaut pour le développement local
@@ -421,8 +578,8 @@ class DatabaseManager:
             return None  # Doublon
         
         cursor.execute(
-            "INSERT INTO games (coups, mode_jeu, statut, ligne_gagnante) VALUES (%s, %s, %s, %s)",
-            (coups, mode_jeu, statut, ligne_gagnante)
+            "INSERT INTO games (coups, coups_symetrique, mode_jeu, statut, ligne_gagnante) VALUES (%s, %s, %s, %s, %s)",
+            (coups, coups_sym, mode_jeu, statut, ligne_gagnante)
         )
         self.connection.commit()
         game_id = cursor.lastrowid
@@ -457,8 +614,8 @@ app = Flask(__name__)
 
 # Instances globales
 db_manager = DatabaseManager()
-minimax_ai = MinimaxAI(depth=4, name="Minimax Web")
 random_ai = RandomAI(name="Random Web")
+minimax_ai = MinimaxAI(depth=4, name="Minimax Web")
 
 
 def init_db():
@@ -529,7 +686,7 @@ def health_db():
 
 @app.route('/api/get_ai_move', methods=['POST'])
 def get_ai_move():
-    """API pour obtenir le coup de l'IA avec scores Minimax."""
+    """API IA: Minimax ou ML, avec réflexes obligatoires (gain/blocage)."""
     try:
         data = request.get_json()
         grid_data = data.get('grid')
@@ -550,32 +707,19 @@ def get_ai_move():
             for c in range(cols):
                 board.grid[rows - 1 - r][c] = grid_data[r][c]
         
-        column_scores = {}
-        
-        if ai_type == 'minimax':
-            minimax_ai.depth = int(depth)
-            minimax_ai.set_player(player)
-            
-            valid_locations = board.get_valid_locations()
-            best_score = float('-inf')
-            best_column = valid_locations[0] if valid_locations else None
-            
-            for col in valid_locations:
-                row = board.get_next_open_row(col)
-                if row is not None:
-                    temp_board = board.copy()
-                    temp_board.drop_piece(row, col, player)
-                    _, score = minimax_ai.minimax(
-                        temp_board, minimax_ai.depth - 1,
-                        float('-inf'), float('inf'), False
-                    )
-                    column_scores[col] = int(score)
-                    if score > best_score:
-                        best_score = score
-                        best_column = col
-            
-            column = best_column
+        # Etape 1: réflexe obligatoire (gagner / bloquer)
+        forced_column = check_mandatory_moves(board, player)
+        if forced_column is not None:
+            column = forced_column
+            column_scores = {forced_column: 1.0}
+        # Etape 2A: Minimax (arbre)
+        elif ai_type == 'minimax':
+            column, column_scores = predict_move_with_minimax(board, player, depth)
+        # Etape 2B: IA ML (modele entrainé)
+        elif ai_type == 'ml':
+            column, column_scores = predict_move_with_model(board, player)
         else:
+            column_scores = {}
             column = random_ai.get_move(board)
         
         if column is None:

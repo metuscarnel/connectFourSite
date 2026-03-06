@@ -254,7 +254,7 @@
         #scores-container {
             display: grid;
             width: 100%;
-            grid-template-columns: repeat(9, minmax(var(--touch-size), 1fr));
+            grid-template-columns: repeat(9, 1fr);
             gap: clamp(4px, 1vw, 8px);
             margin-bottom: 2px;
         }
@@ -298,17 +298,16 @@
             padding: clamp(8px, 2.2vw, 20px);
             box-shadow: 0 15px 50px rgba(0,0,0,0.4);
             display: grid;
-            grid-template-columns: repeat(9, minmax(var(--touch-size), 1fr));
+            grid-template-columns: repeat(9, 1fr);
             grid-template-rows: repeat(8, 1fr);
             gap: clamp(4px, 1vw, 8px);
             aspect-ratio: 9 / 8;
-            overflow-x: auto;
+            overflow: hidden;
         }
 
         .cell {
             width: 100%;
-            min-width: var(--touch-size);
-            min-height: var(--touch-size);
+            min-height: 0;
             aspect-ratio: 1 / 1;
             background: rgba(255, 255, 255, 0.15);
             border-radius: 50%;
@@ -527,6 +526,19 @@
             .replay-panel {
                 flex-direction: column;
             }
+
+            #board,
+            #scores-container {
+                gap: clamp(2px, 0.7vw, 5px);
+            }
+
+            #board {
+                padding: clamp(4px, 1.2vw, 10px);
+            }
+
+            .cell {
+                border-width: 2px;
+            }
         }
 
         @media (min-width: 992px) {
@@ -568,6 +580,12 @@
             }
         }
 
+        @media (min-width: 480px) {
+            .cell {
+                min-height: var(--touch-size);
+            }
+        }
+
         @media (prefers-reduced-motion: reduce) {
             *,
             *::before,
@@ -581,7 +599,7 @@
     </style>
 </head>
 <body>
-    <h1>🎮 Puissance 4 PRO</h1>
+    <h1>🎮 Connect4 Métus </h1>
 
     <!-- Panneau Mode Replay (affiché uniquement en mode replay) -->
     <div id="replayPanel" class="replay-panel">
@@ -613,7 +631,8 @@
             <label for="aiType">Type d'IA</label>
             <select id="aiType">
                 <option value="random">Facile (Aléatoire)</option>
-                <option value="minimax" selected>Difficile (Minimax)</option>
+                <option value="minimax" selected>Stratégique (Minimax)</option>
+                <option value="ml">IA Apprenante (Modèle ML)</option>
             </select>
         </div>
 
@@ -650,7 +669,7 @@
             <a href="/historique" class="history-link full" aria-label="Ouvrir l'historique des parties">📜 Voir l'historique des parties</a>
 
             <div class="footer">
-                <p>🚀 Clone complet du jeu local | Flask + Python + JavaScript | Soutenance PRO</p>
+                <p>🚀 Connect4 By Métus | Flask + Python + JavaScript</p>
             </div>
         </aside>
     </div>
@@ -795,7 +814,7 @@
             
             boardElement.innerHTML = '';
             boardElement.style.gridTemplateRows = `repeat(${ROWS}, 1fr)`;
-            boardElement.style.gridTemplateColumns = `repeat(${COLS}, minmax(var(--touch-size), 1fr))`;
+            boardElement.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
 
             for (let row = 0; row < ROWS; row++) {
                 for (let col = 0; col < COLS; col++) {
@@ -821,7 +840,20 @@
         // ============================================================
         function renderScores(scores) {
             scoresContainer.innerHTML = '';
-            scoresContainer.style.gridTemplateColumns = `repeat(${COLS}, minmax(var(--touch-size), 1fr))`;
+            scoresContainer.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+
+            const scoreValues = Object.values(scores)
+                .map((value) => Number(value))
+                .filter((value) => Number.isFinite(value));
+            const isProbabilityScale =
+                scoreValues.length > 0 && scoreValues.every((value) => value >= 0 && value <= 1);
+
+            function formatScore(score) {
+                if (isProbabilityScale) {
+                    return `${Math.round(score * 100)}%`;
+                }
+                return score >= 0 ? `+${score}` : `${score}`;
+            }
 
             // Trouver le meilleur score
             let bestScore = -Infinity;
@@ -839,11 +871,11 @@
 
                 if (scores.hasOwnProperty(col)) {
                     const score = scores[col];
-                    scoreCell.textContent = score >= 0 ? `+${score}` : score;
+                    scoreCell.textContent = formatScore(score);
 
                     if (col === bestCol) {
                         scoreCell.classList.add('best');
-                        scoreCell.textContent = `★${score}`;
+                        scoreCell.textContent = `★${formatScore(score)}`;
                     } else if (score > 0) {
                         scoreCell.classList.add('positive');
                     } else if (score < 0) {
