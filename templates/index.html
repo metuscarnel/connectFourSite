@@ -290,6 +290,12 @@
             box-shadow: 0 0 10px rgba(251, 191, 36, 0.8);
         }
 
+        .score-cell.suggestion {
+            outline: 3px solid #fde047;
+            outline-offset: -1px;
+            box-shadow: 0 0 14px rgba(253, 224, 71, 0.9);
+        }
+
         #board {
             background: linear-gradient(180deg, #2563eb 0%, #1e40af 100%);
             border-radius: 15px;
@@ -340,6 +346,10 @@
             animation: winPulse 0.8s ease-in-out infinite;
             box-shadow: 0 0 25px rgba(255, 255, 255, 0.9) !important;
             border-color: #fff !important;
+        }
+
+        .cell.suggestion {
+            box-shadow: inset 0 0 0 3px #fde047, 0 0 10px rgba(253, 224, 71, 0.85);
         }
 
         @keyframes winPulse {
@@ -637,12 +647,21 @@
         </div>
 
         <div class="control-group">
+            <label for="playerColor">Votre couleur (PvAI)</label>
+            <select id="playerColor">
+                <option value="1" selected>Joueur 1 - Rouge</option>
+                <option value="2">Joueur 2 - Jaune</option>
+            </select>
+        </div>
+
+        <div class="control-group">
             <label for="depthRange">Profondeur: <span id="depthValue" class="depth-display">4</span></label>
             <input type="range" id="depthRange" min="1" max="6" value="4">
         </div>
 
         <button id="newGameBtn">🎲 Nouvelle Partie</button>
         <button id="pauseBtn" class="pause-btn">⏸️ Pause</button>
+        <button id="suggestBtn">💡 Conseil de l'IA</button>
     </div>
 
     <div class="game-layout">
@@ -710,12 +729,14 @@
         let gameMode = 'pvai';
         let aiType = 'minimax';
         let aiDepth = 4;
+        let humanPlayer = PLAYER1;
         let gameActive = false;
         let isAIThinking = false;
         let isPaused = false;
         let moveHistory = [];        // Historique des coups pour sauvegarde BDD
         let lastColumnScores = {};   // Derniers scores Minimax calculés
         let pendingAIAction = null;  // Action IA en attente (pour reprise après pause)
+        let suggestedColumn = null;
 
         // ============================================================
         // ÉTAT MODE REPLAY (clone du système local src/)
@@ -736,10 +757,12 @@
         const scoresContainer = document.getElementById('scores-container');
         const gameModeSelect = document.getElementById('gameMode');
         const aiTypeSelect = document.getElementById('aiType');
+        const playerColorSelect = document.getElementById('playerColor');
         const depthRange = document.getElementById('depthRange');
         const depthValue = document.getElementById('depthValue');
         const newGameBtn = document.getElementById('newGameBtn');
         const pauseBtn = document.getElementById('pauseBtn');
+        const suggestBtn = document.getElementById('suggestBtn');
         const pauseOverlay = document.getElementById('pauseOverlay');
 
         // Éléments Mode Replay
@@ -771,6 +794,96 @@
             botDepthInfo.textContent = depthRange.value;
         }
 
+        function clearSuggestionHighlight() {
+            suggestedColumn = null;
+            document.querySelectorAll('.score-cell.suggestion').forEach((cell) => {
+                cell.classList.remove('suggestion');
+            });
+            document.querySelectorAll('.cell.suggestion').forEach((cell) => {
+                cell.classList.remove('suggestion');
+            });
+        }
+
+        function highlightSuggestedColumn(col) {
+            clearSuggestionHighlight();
+            suggestedColumn = col;
+
+            const scoreCell = scoresContainer.children[col];
+            if (scoreCell) {
+                scoreCell.classList.add('suggestion');
+            }
+
+            document.querySelectorAll(`.cell[data-col="${col}"]`).forEach((cell) => {
+                cell.classList.add('suggestion');
+            });
+        }
+
+        async function refreshProbabilityHints() {
+            if (!gameActive || isReplayMode || gameMode === 'pvp') {
+                renderScores({});
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/get_ai_move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grid,
+                        ai_type: 'ml',
+                        player: currentPlayer,
+                        depth: aiDepth
+                    })
+                });
+
+                const result = await response.json();
+                if (result.success && result.column_scores && Object.keys(result.column_scores).length > 0) {
+                    renderScores(result.column_scores, Number(result.column));
+                    if (suggestedColumn !== null) {
+                        highlightSuggestedColumn(suggestedColumn);
+                    }
+                }
+            } catch (error) {
+                console.warn('⚠️ Impossible de rafraichir les probabilités ML:', error);
+            }
+        }
+
+        async function requestAISuggestion() {
+            if (!gameActive || isPaused || isAIThinking || isReplayMode) {
+                return;
+            }
+
+            updateStatus('💡 Analyse en cours...');
+
+            try {
+                const response = await fetch('/api/get_ai_move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grid,
+                        ai_type: aiType,
+                        player: currentPlayer,
+                        depth: aiDepth
+                    })
+                });
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || 'Erreur suggestion IA');
+                }
+
+                if (result.column_scores && Object.keys(result.column_scores).length > 0) {
+                    renderScores(result.column_scores, Number(result.column));
+                }
+
+                highlightSuggestedColumn(result.column);
+                updateStatus(`💡 Conseil: jouer la colonne ${result.column + 1}`);
+            } catch (error) {
+                console.error('❌ Erreur suggestion IA:', error);
+                updateStatus('❌ Conseil indisponible');
+            }
+        }
+
         // ============================================================
         // INITIALISATION DU PLATEAU
         // ============================================================
@@ -784,6 +897,9 @@
             moveHistory = [];
             lastColumnScores = {};
             pendingAIAction = null;
+            clearSuggestionHighlight();
+
+            humanPlayer = parseInt(playerColorSelect.value, 10);
 
             // Mise à jour UI
             pauseBtn.textContent = '⏸️ Pause';
@@ -793,12 +909,19 @@
             renderBoard();
             renderScores({});
             updateStatus();
+            refreshProbabilityHints();
 
             console.log(`🎮 Nouvelle partie - Mode: ${gameMode}, IA: ${aiType}, Profondeur: ${aiDepth}`);
 
             // Si mode IA vs IA, démarrer automatiquement
             if (gameMode === 'aivai') {
                 setTimeout(() => playAIVsAITurn(), 800);
+            } else if (gameMode === 'pvai' && humanPlayer === PLAYER2) {
+                setTimeout(() => {
+                    if (gameActive && !isPaused) {
+                        playAIMove();
+                    }
+                }, 450);
             }
         }
 
@@ -838,7 +961,7 @@
         // ============================================================
         // AFFICHAGE DES SCORES MINIMAX (XAI)
         // ============================================================
-        function renderScores(scores) {
+        function renderScores(scores, forcedBestCol = null) {
             scoresContainer.innerHTML = '';
             scoresContainer.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
 
@@ -855,13 +978,17 @@
                 return score >= 0 ? `+${score}` : `${score}`;
             }
 
-            // Trouver le meilleur score
-            let bestScore = -Infinity;
-            let bestCol = -1;
-            for (const [col, score] of Object.entries(scores)) {
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestCol = parseInt(col);
+            // Trouver la meilleure colonne: priorite a la colonne fournie par l'API
+            let bestCol = Number.isInteger(forcedBestCol) ? forcedBestCol : -1;
+            if (bestCol < 0 || bestCol >= COLS) {
+                let bestScore = -Infinity;
+                for (const [col, score] of Object.entries(scores)) {
+                    const numScore = Number(score);
+                    if (!Number.isFinite(numScore)) continue;
+                    if (numScore > bestScore) {
+                        bestScore = numScore;
+                        bestCol = parseInt(col, 10);
+                    }
                 }
             }
 
@@ -870,7 +997,7 @@
                 scoreCell.className = 'score-cell';
 
                 if (scores.hasOwnProperty(col)) {
-                    const score = scores[col];
+                    const score = Number(scores[col]);
                     scoreCell.textContent = formatScore(score);
 
                     if (col === bestCol) {
@@ -911,7 +1038,7 @@
             }
 
             // En mode PvAI : joueur humain = PLAYER1 uniquement
-            if (gameMode === 'pvai' && currentPlayer === PLAYER2) {
+            if (gameMode === 'pvai' && currentPlayer !== humanPlayer) {
                 console.log('⛔ Clic ignoré : tour de l\'IA');
                 return;
             }
@@ -922,8 +1049,7 @@
                 return;
             }
 
-            // Effacer les scores (c'est le tour de l'humain)
-            renderScores({});
+            clearSuggestionHighlight();
 
             // Jouer le coup
             dropToken(col, currentPlayer);
@@ -1063,9 +1189,10 @@
         function switchPlayer() {
             currentPlayer = currentPlayer === PLAYER1 ? PLAYER2 : PLAYER1;
             updateStatus();
+            refreshProbabilityHints();
 
             // Si mode PvAI et c'est le tour de l'IA
-            if (gameMode === 'pvai' && currentPlayer === PLAYER2 && gameActive) {
+            if (gameMode === 'pvai' && currentPlayer !== humanPlayer && gameActive) {
                 if (!isPaused) {
                     setTimeout(() => playAIMove(), 600);
                 } else {
@@ -1079,6 +1206,7 @@
         // ============================================================
         async function playAIMove() {
             if (!gameActive || isAIThinking || isPaused) return;
+            if (gameMode === 'pvai' && currentPlayer === humanPlayer) return;
 
             isAIThinking = true;
             updateStatus('🤖 L\'IA réfléchit...');
@@ -1098,10 +1226,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    // Afficher les scores Minimax
-                    if (result.column_scores && Object.keys(result.column_scores).length > 0) {
-                        renderScores(result.column_scores);
-                    }
+                    clearSuggestionHighlight();
 
                     isAIThinking = false;
 
@@ -1112,6 +1237,7 @@
                     }
 
                     dropToken(result.column, currentPlayer);
+                    setTimeout(() => refreshProbabilityHints(), 40);
                 } else {
                     throw new Error(result.error || 'Erreur IA');
                 }
@@ -1151,10 +1277,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    // Afficher les scores
-                    if (result.column_scores && Object.keys(result.column_scores).length > 0) {
-                        renderScores(result.column_scores);
-                    }
+                    clearSuggestionHighlight();
 
                     isAIThinking = false;
 
@@ -1164,6 +1287,7 @@
                     }
 
                     dropToken(result.column, currentPlayer);
+                    setTimeout(() => refreshProbabilityHints(), 40);
 
                     // Continuer la boucle si partie active
                     // (checkWinCondition appellera switchPlayer qui ne relance pas en mode aivai)
@@ -1248,10 +1372,12 @@
                 const playerName = currentPlayer === PLAYER1 ? 'Rouge 🔴' : 'Jaune 🟡';
                 statusElement.textContent = `Tour du Joueur ${currentPlayer} (${playerName})`;
             } else if (gameMode === 'pvai') {
-                if (currentPlayer === PLAYER1) {
-                    statusElement.textContent = '🎮 Votre tour (Rouge 🔴)';
+                if (currentPlayer === humanPlayer) {
+                    const humanColor = humanPlayer === PLAYER1 ? 'Rouge 🔴' : 'Jaune 🟡';
+                    statusElement.textContent = `🎮 Votre tour (${humanColor})`;
                 } else {
-                    statusElement.textContent = '🤖 Tour de l\'IA (Jaune 🟡)';
+                    const aiColor = humanPlayer === PLAYER1 ? 'Jaune 🟡' : 'Rouge 🔴';
+                    statusElement.textContent = `🤖 Tour de l'IA (${aiColor})`;
                 }
             } else if (gameMode === 'aivai') {
                 const iaName = currentPlayer === PLAYER1 ? 'Rouge' : 'Jaune';
@@ -1271,14 +1397,32 @@
 
         pauseBtn.addEventListener('click', togglePause);
 
+        suggestBtn.addEventListener('click', () => {
+            requestAISuggestion();
+        });
+
         depthRange.addEventListener('input', (e) => {
             aiDepth = parseInt(e.target.value);
             depthValue.textContent = aiDepth;
             syncBotInfo();
+            refreshProbabilityHints();
         });
 
-        gameModeSelect.addEventListener('change', syncBotInfo);
-        aiTypeSelect.addEventListener('change', syncBotInfo);
+        gameModeSelect.addEventListener('change', () => {
+            syncBotInfo();
+            suggestBtn.disabled = gameModeSelect.value === 'pvp';
+            refreshProbabilityHints();
+        });
+        aiTypeSelect.addEventListener('change', () => {
+            syncBotInfo();
+        });
+        playerColorSelect.addEventListener('change', () => {
+            humanPlayer = parseInt(playerColorSelect.value, 10);
+            updateStatus();
+            if (gameActive) {
+                refreshProbabilityHints();
+            }
+        });
 
         // ============================================================
         // FONCTIONS MODE REPLAY (clone du système local src/)
@@ -1553,8 +1697,10 @@
             gameMode = gameModeSelect.value;
             aiType = aiTypeSelect.value;
             aiDepth = parseInt(depthRange.value);
+            humanPlayer = parseInt(playerColorSelect.value, 10);
             depthValue.textContent = aiDepth;
             syncBotInfo();
+            suggestBtn.disabled = gameMode === 'pvp';
 
             // Afficher le plateau vide
             renderBoard();
