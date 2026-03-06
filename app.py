@@ -707,13 +707,68 @@ def get_ai_move():
             for c in range(cols):
                 board.grid[rows - 1 - r][c] = grid_data[r][c]
         
-        # Etape 1: réflexe obligatoire (gagner / bloquer)
-        forced_column = check_mandatory_moves(board, player)
-        if forced_column is not None:
-            column = forced_column
-            column_scores = {forced_column: 1.0}
+        opponent = PLAYER1 if player == PLAYER2 else PLAYER2
+
+        # Priorite 1: gagner immediatement (boucle simple sur les 9 colonnes)
+        for col in range(cols):
+            if not board.is_valid_location(col):
+                continue
+            row = board.get_next_open_row(col)
+            if row is None:
+                continue
+
+            temp = board.copy()
+            temp.drop_piece(row, col, player)
+            if temp.check_win(player):
+                return jsonify({
+                    "success": True,
+                    "column": col,
+                    "column_scores": {col: 1.0}
+                })
+
+        # Priorite 2: bloquer la defaite immediate (boucle simple sur les 9 colonnes)
+        for col in range(cols):
+            if not board.is_valid_location(col):
+                continue
+            row = board.get_next_open_row(col)
+            if row is None:
+                continue
+
+            temp = board.copy()
+            temp.drop_piece(row, col, opponent)
+            if temp.check_win(opponent):
+                return jsonify({
+                    "success": True,
+                    "column": col,
+                    "column_scores": {col: 1.0}
+                })
+
+        # Priorite 3: casser une double menace horizontale de type _ O O _
+        threat_columns = set()
+        for row in range(rows):
+            for start_col in range(cols - 3):
+                window = [board.grid[row][start_col + i] for i in range(4)]
+                if window != [EMPTY, opponent, opponent, EMPTY]:
+                    continue
+
+                left_col = start_col
+                right_col = start_col + 3
+
+                if board.is_valid_location(left_col) and board.get_next_open_row(left_col) == row:
+                    threat_columns.add(left_col)
+                if board.is_valid_location(right_col) and board.get_next_open_row(right_col) == row:
+                    threat_columns.add(right_col)
+
+        for col in range(cols):
+            if col in threat_columns:
+                return jsonify({
+                    "success": True,
+                    "column": col,
+                    "column_scores": {col: 0.9}
+                })
+
         # Etape 2A: Minimax (arbre)
-        elif ai_type == 'minimax':
+        if ai_type == 'minimax':
             column, column_scores = predict_move_with_minimax(board, player, depth)
         # Etape 2B: IA ML (modele entrainé)
         elif ai_type == 'ml':
