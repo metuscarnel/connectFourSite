@@ -20,6 +20,7 @@ from copy import deepcopy
 from flask import Flask, render_template, request, jsonify
 import numpy as np
 import joblib
+from image_processor import process_connect4_image
 
 # ============================================================
 # CONSTANTES DU JEU (intégrées depuis src/utils/constants.py)
@@ -219,7 +220,7 @@ class MinimaxAI:
                 board.check_win(self.opponent_piece) or 
                 board.is_full())
     
-    def minimax(self, board: Board, depth: int, alpha: float, beta: float, maximizing: bool) -> Tuple[Optional[int], float]:
+    def minimax(self, board: Board, depth: int, alpha: float, beta: float, maximizing: bool) -> Tuple[Optional[int], float, List[int]]:
         """Algorithme Minimax avec Alpha-Beta."""
         valid_locations = board.get_valid_locations()
         is_terminal = self.is_terminal_node(board)
@@ -227,17 +228,18 @@ class MinimaxAI:
         if depth == 0 or is_terminal:
             if is_terminal:
                 if board.check_win(self.piece):
-                    return (None, 100000)
+                    return (None, 100000 + depth, [])
                 elif board.check_win(self.opponent_piece):
-                    return (None, -100000)
+                    return (None, -100000 - depth, [])
                 else:
-                    return (None, 0)
+                    return (None, 0, [])
             else:
-                return (None, self.score_position(board, self.piece))
+                return (None, float(self.score_position(board, self.piece)), [])
         
         if maximizing:
             value = float('-inf')
             column = random.choice(valid_locations) if valid_locations else None
+            best_pv = []
             
             for col in valid_locations:
                 row = board.get_next_open_row(col)
@@ -245,18 +247,20 @@ class MinimaxAI:
                     continue
                 temp_board = board.copy()
                 temp_board.drop_piece(row, col, self.piece)
-                new_score = self.minimax(temp_board, depth - 1, alpha, beta, False)[1]
+                _, new_score, new_pv = self.minimax(temp_board, depth - 1, alpha, beta, False)
                 
                 if new_score > value:
                     value = new_score
                     column = col
+                    best_pv = new_pv
                 alpha = max(alpha, value)
                 if alpha >= beta:
                     break
-            return column, value
+            return column, value, ([column] + best_pv) if column is not None else []
         else:
             value = float('inf')
             column = random.choice(valid_locations) if valid_locations else None
+            best_pv = []
             
             for col in valid_locations:
                 row = board.get_next_open_row(col)
@@ -264,15 +268,16 @@ class MinimaxAI:
                     continue
                 temp_board = board.copy()
                 temp_board.drop_piece(row, col, self.opponent_piece)
-                new_score = self.minimax(temp_board, depth - 1, alpha, beta, True)[1]
+                _, new_score, new_pv = self.minimax(temp_board, depth - 1, alpha, beta, True)
                 
                 if new_score < value:
                     value = new_score
                     column = col
+                    best_pv = new_pv
                 beta = min(beta, value)
                 if alpha >= beta:
                     break
-            return column, value
+            return column, value, ([column] + best_pv) if column is not None else []
     
     def get_move(self, board: Board) -> Optional[int]:
         """Retourne le meilleur coup."""
@@ -301,8 +306,8 @@ class MinimaxAI:
                     return col
         
         # Minimax
-        column, _ = self.minimax(board, self.depth, float('-inf'), float('inf'), True)
-        return column
+        res = self.minimax(board, self.depth, float('-inf'), float('inf'), True)
+        return res[0]
 
 
 # ============================================================
@@ -435,11 +440,11 @@ def predict_move_with_model(board: Board, player: int) -> Tuple[Optional[int], d
         return random_ai.get_move(board), {}
 
 
-def predict_move_with_minimax(board: Board, player: int, depth: int) -> Tuple[Optional[int], dict]:
+def predict_move_with_minimax(board: Board, player: int, depth: int) -> Tuple[Optional[int], dict, float, List[int]]:
     """Prédit la meilleure colonne avec Minimax (calcul d'arbre local)."""
     valid_locations = board.get_valid_locations()
     if not valid_locations:
-        return None, {}
+        return None, {}, 0.0, []
 
     minimax_ai.depth = max(1, int(depth))
     minimax_ai.set_player(player)
@@ -447,6 +452,7 @@ def predict_move_with_minimax(board: Board, player: int, depth: int) -> Tuple[Op
     best_score = float('-inf')
     best_column = valid_locations[0]
     column_scores: dict = {}
+    best_pv = []
 
     for col in valid_locations:
         row = board.get_next_open_row(col)
@@ -457,9 +463,10 @@ def predict_move_with_minimax(board: Board, player: int, depth: int) -> Tuple[Op
         temp_board.drop_piece(row, col, player)
 
         if temp_board.check_win(player):
-            score = 100000
+            score = 100000.0
+            current_pv = []
         else:
-            _, score = minimax_ai.minimax(
+            _, score, current_pv = minimax_ai.minimax(
                 temp_board,
                 minimax_ai.depth - 1,
                 float('-inf'),
@@ -467,13 +474,14 @@ def predict_move_with_minimax(board: Board, player: int, depth: int) -> Tuple[Op
                 False,
             )
 
-        score = int(score)
+        score = float(score)
         column_scores[col] = score
         if score > best_score:
             best_score = score
             best_column = col
+            best_pv = [col] + current_pv
 
-    return best_column, column_scores
+    return best_column, column_scores, best_score, best_pv
 
 
 # ============================================================
@@ -720,10 +728,13 @@ def get_ai_move():
             temp = board.copy()
             temp.drop_piece(row, col, player)
             if temp.check_win(player):
+                nom_joueur = "Rouge" if player == PLAYER1 else "Jaune"
                 return jsonify({
                     "success": True,
                     "column": col,
-                    "column_scores": {col: 1.0}
+                    "column_scores": {col: 100000},
+                    "pv": [col],
+                    "prediction": f"Victoire du {nom_joueur} en 1 coup"
                 })
 
         # Priorite 2: bloquer la defaite immediate (boucle simple sur les 9 colonnes)
@@ -740,7 +751,9 @@ def get_ai_move():
                 return jsonify({
                     "success": True,
                     "column": col,
-                    "column_scores": {col: 1.0}
+                    "column_scores": {col: 90000},
+                    "pv": [col],
+                    "prediction": "Coup de blocage critique"
                 })
 
         # Priorite 3: casser une double menace horizontale de type _ O O _
@@ -767,9 +780,11 @@ def get_ai_move():
                     "column_scores": {col: 0.9}
                 })
 
+        pv = []
+        best_score = 0.0
         # Etape 2A: Minimax (arbre)
         if ai_type == 'minimax':
-            column, column_scores = predict_move_with_minimax(board, player, depth)
+            column, column_scores, best_score, pv = predict_move_with_minimax(board, player, depth)
         # Etape 2B: IA ML (modele entrainé)
         elif ai_type == 'ml':
             column, column_scores = predict_move_with_model(board, player)
@@ -780,14 +795,99 @@ def get_ai_move():
         if column is None:
             return jsonify({"success": False, "error": "Aucun coup possible"}), 200
         
+        # Prédiction d'issue (Victoire, Défaite, Nul, Incertain)
+        prediction = "Incertain"
+        nb_coups = len(pv) if pv else 1
+        
+        if best_score >= 10000:
+            nom_joueur = "Rouge" if player == PLAYER1 else "Jaune"
+            prediction = f"Victoire du {nom_joueur} en {nb_coups} coup(s)"
+        elif best_score <= -10000:
+            nom_adversaire = "Jaune" if player == PLAYER1 else "Rouge"
+            prediction = f"Défaite ({nom_adversaire} gagne en {nb_coups} coup(s))"
+        elif board.is_full() or (best_score == 0 and len(board.get_valid_locations()) <= 2):
+            prediction = "Nul"
+
         return jsonify({
             "success": True,
             "column": column,
-            "column_scores": column_scores
+            "column_scores": column_scores,
+            "pv": pv,
+            "prediction": prediction
         })
     
     except Exception as e:
         print(f"[API ERROR] get_ai_move: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+@app.route('/api/analyze_image', methods=['POST'])
+def analyze_image():
+    """Analyse une image uploadée et calcule la séquence de coups gagnante."""
+    try:
+        if 'image' not in request.files:
+            return jsonify({"success": False, "error": "Aucune image envoyée."}), 400
+            
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({"success": False, "error": "Fichier vide."}), 400
+            
+        image_bytes = file.read()
+        
+        # Sauvegarde silencieuse pour debug de la vision par ordinateur
+        import os
+        with open("debug_last_image.png", "wb") as f:
+            f.write(image_bytes)
+        
+        # 1. Traitement OpenCV pour obtenir la grille (ROWS x COLS)
+        grid_data = process_connect4_image(image_bytes)
+        
+        # 2. Création de l'objet Board pour évaluer la situation
+        board = Board(rows=ROWS, cols=COLS)
+        
+        # Mapping sécurisé : la grille de l'image (dynamic rows/cols)
+        # est placée en bas et alignée à gauche de notre grille 8x9 temporelle
+        img_rows = len(grid_data)
+        img_cols = len(grid_data[0]) if img_rows > 0 else 0
+        
+        # On ne garde que les {ROWS} dernières lignes et {COLS} premières colonnes trouvées
+        for r in range(min(ROWS, img_rows)):
+            for c in range(min(COLS, img_cols)):
+                # grid_data[0] est le haut de l'image. board.grid[0] est le bas du jeu.
+                board_row_idx = r
+                img_row_idx = img_rows - 1 - r
+                board.grid[board_row_idx][c] = grid_data[img_row_idx][c]
+                
+        # 3. Évaluation du joueur actif (comptage des pions)
+        p1_count = np.count_nonzero(board.grid == PLAYER1)
+        p2_count = np.count_nonzero(board.grid == PLAYER2)
+        player = PLAYER1 if p1_count <= p2_count else PLAYER2
+        
+        # 4. Prédiction Minimax pour les coups restants à la victoire
+        # On va chercher à profondeur 8 pour anticiper encore mieux lors d'une analyse d'image
+        column, column_scores, best_score, pv = predict_move_with_minimax(board, player, depth=8)
+        
+        prediction = "Incertain"
+        nb_coups = len(pv) if pv else 1
+        
+        if best_score >= 10000:
+            nom_joueur = "Rouge" if player == PLAYER1 else "Jaune"
+            prediction = f"Victoire du {nom_joueur} en {nb_coups} coup(s)"
+        elif best_score <= -10000:
+            nom_adversaire = "Jaune" if player == PLAYER1 else "Rouge"
+            prediction = f"Défaite ({nom_adversaire} gagne en {nb_coups} coup(s))"
+        elif board.is_full() or (best_score == 0 and len(board.get_valid_locations()) <= 2):
+            prediction = "Nul"
+
+        return jsonify({
+            "success": True,
+            "grid": grid_data,
+            "next_player": player,
+            "pv": pv,
+            "prediction": prediction,
+            "best_score": best_score,
+            "suggested_column": column
+        })
+    except Exception as e:
+        print(f"[API ERROR] analyze_image: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

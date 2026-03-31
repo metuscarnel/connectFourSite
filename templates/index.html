@@ -627,6 +627,18 @@
         </div>
     </div>
 
+    <!-- Panneau Mode Éditeur -->
+    <div id="editorPanel" class="replay-panel" style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);">
+        <span class="replay-title">🎨 MODE ÉDITEUR</span>
+        <div class="replay-buttons">
+            <button id="paintRedBtn" class="replay-btn" style="color: #ef4444; border: 3px solid #ef4444;">🔴 Rouge</button>
+            <button id="paintYellowBtn" class="replay-btn" style="color: #f59e0b; border: 3px solid transparent;">🟡 Jaune</button>
+            <button id="paintEraseBtn" class="replay-btn" style="color: #6b7280; border: 3px solid transparent;">🧽 Gomme</button>
+            <button id="paintClearBtn" class="replay-btn quit">🧹 Vider Prt.</button>
+            <button id="paintPlayBtn" class="replay-btn auto">▶️ Jouer depuis ici</button>
+        </div>
+    </div>
+
     <div class="controls">
         <div class="control-group">
             <label for="gameMode">Mode de jeu</label>
@@ -662,6 +674,9 @@
         <button id="newGameBtn">🎲 Nouvelle Partie</button>
         <button id="pauseBtn" class="pause-btn">⏸️ Pause</button>
         <button id="suggestBtn">💡 Conseil de l'IA</button>
+        <button id="uploadBtn" onclick="document.getElementById('imageInput').click()">📸 Analyser Image</button>
+        <input type="file" id="imageInput" accept="image/*" style="display: none;">
+        <button id="editModeBtn" style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);">🎨 Éditeur</button>
     </div>
 
     <div class="game-layout">
@@ -669,6 +684,9 @@
             <div id="status">Cliquez sur "Nouvelle Partie" pour commencer !</div>
 
             <div class="board-shell">
+                <div id="predictionBadge" style="display:none; text-align:center; padding: 10px; margin-bottom: 8px; border-radius: 10px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); background: var(--surface); color: #333; font-size: 1.1em;">
+                    🔮 Prédiction IA : <span id="predictionText">Incertain</span>
+                </div>
                 <!-- Affichage des scores Minimax -->
                 <div id="scores-container"></div>
                 <div id="board"></div>
@@ -739,6 +757,13 @@
         let suggestedColumn = null;
 
         // ============================================================
+        // ÉTAT MODE ÉDITEUR
+        // ============================================================
+        let isEditMode = false;
+        let paintTool = PLAYER1; // 1: Rouge, 2: Jaune, 0: Gomme
+        let isProcessingMove = false; // Verrou anti-spam de clics
+
+        // ============================================================
         // ÉTAT MODE REPLAY (clone du système local src/)
         // ============================================================
         let isReplayMode = false;
@@ -764,6 +789,15 @@
         const pauseBtn = document.getElementById('pauseBtn');
         const suggestBtn = document.getElementById('suggestBtn');
         const pauseOverlay = document.getElementById('pauseOverlay');
+
+        // Éléments Mode Éditeur
+        const editModeBtn = document.getElementById('editModeBtn');
+        const editorPanel = document.getElementById('editorPanel');
+        const paintRedBtn = document.getElementById('paintRedBtn');
+        const paintYellowBtn = document.getElementById('paintYellowBtn');
+        const paintEraseBtn = document.getElementById('paintEraseBtn');
+        const paintClearBtn = document.getElementById('paintClearBtn');
+        const paintPlayBtn = document.getElementById('paintPlayBtn');
 
         // Éléments Mode Replay
         const replayPanel = document.getElementById('replayPanel');
@@ -894,10 +928,15 @@
             gameActive = true;
             isAIThinking = false;
             isPaused = false;
+            isProcessingMove = false;
             moveHistory = [];
+            isEditMode = false;
+            editorPanel.classList.remove('active');
+            document.querySelector('.controls').style.display = 'flex';
             lastColumnScores = {};
             pendingAIAction = null;
             clearSuggestionHighlight();
+            hidePrediction();
 
             humanPlayer = parseInt(playerColorSelect.value, 10);
 
@@ -952,7 +991,16 @@
                         cell.classList.add('player2');
                     }
 
-                    cell.addEventListener('click', () => handleCellClick(col));
+                    // Enregistrer row en plus de col pour l'éditeur
+                    cell.addEventListener('click', () => handleCellClick(row, col));
+                    
+                    // Pour pouvoir "peindre" en glissant
+                    cell.addEventListener('mouseenter', (e) => {
+                        if (isEditMode && e.buttons === 1) { // 1 = Click gauche maintenu
+                            paintCell(row, col);
+                        }
+                    });
+
                     boardElement.appendChild(cell);
                 }
             }
@@ -1021,8 +1069,14 @@
         // ============================================================
         // GESTION DES CLICS UTILISATEUR
         // ============================================================
-        function handleCellClick(col) {
-            console.log(`🖱️ Clic colonne ${col} | gameActive=${gameActive}, isPaused=${isPaused}, isAIThinking=${isAIThinking}, isReplayMode=${isReplayMode}`);
+        function handleCellClick(row, col) {
+            console.log(`🖱️ Clic coords (${row}, ${col}) | gameActive=${gameActive}, isPaused=${isPaused}, isEditMode=${isEditMode}`);
+
+            // Mode Éditeur prioritaire sur tout
+            if (isEditMode) {
+                paintCell(row, col);
+                return;
+            }
 
             // Blocage Mode Replay
             if (isReplayMode) {
@@ -1032,7 +1086,7 @@
             }
 
             // Blocages standards
-            if (!gameActive || isPaused || isAIThinking) {
+            if (!gameActive || isPaused || isAIThinking || isProcessingMove) {
                 console.log('⛔ Clic ignoré');
                 return;
             }
@@ -1052,7 +1106,11 @@
             clearSuggestionHighlight();
 
             // Jouer le coup
-            dropToken(col, currentPlayer);
+            isProcessingMove = true;
+            const success = dropToken(col, currentPlayer);
+            if (!success) {
+                isProcessingMove = false;
+            }
         }
 
         // ============================================================
@@ -1112,6 +1170,11 @@
 
                 if (result.game_over) {
                     gameActive = false;
+                    isAIThinking = false;
+                    isProcessingMove = false;
+
+                    // Effacer immédiatement le badge de prédiction (séquence, etc.)
+                    hidePrediction();
 
                     if (result.winner) {
                         const winnerName = result.winner === PLAYER1 ? 'Joueur 1 (Rouge 🔴)' : 'Joueur 2 (Jaune 🟡)';
@@ -1126,10 +1189,13 @@
                 } else {
                     // Partie continue : changer de joueur
                     switchPlayer();
+                    isProcessingMove = false;
                 }
             } catch (error) {
                 console.error('❌ Erreur check_win:', error);
-                updateStatus('❌ Erreur de connexion au serveur');
+                updateStatus('❌ Erreur de vérification de victoire. Partie arrêtée par sécurité.');
+                gameActive = false;
+                isProcessingMove = false;
             }
         }
 
@@ -1227,6 +1293,9 @@
 
                 if (result.success) {
                     clearSuggestionHighlight();
+                    if (result.prediction) {
+                        showPrediction(result.prediction, result.pv);
+                    }
 
                     isAIThinking = false;
 
@@ -1236,6 +1305,9 @@
                         return;
                     }
 
+                    if (!gameActive) return;
+
+                    isProcessingMove = true;
                     dropToken(result.column, currentPlayer);
                     setTimeout(() => refreshProbabilityHints(), 40);
                 } else {
@@ -1245,6 +1317,7 @@
                 console.error('❌ Erreur IA:', error);
                 updateStatus('❌ Erreur lors du coup de l\'IA');
                 isAIThinking = false;
+                isProcessingMove = false;
                 gameActive = false;
             }
         }
@@ -1278,14 +1351,20 @@
 
                 if (result.success) {
                     clearSuggestionHighlight();
+                    if (result.prediction) {
+                        showPrediction(result.prediction, result.pv);
+                    }
 
                     isAIThinking = false;
 
                     if (isPaused) {
-                        pendingAIAction = { type: 'aiVsAiDrop', column: result.column };
+                        pendingAIAction = 'aiVsAi';
                         return;
                     }
 
+                    if (!gameActive) return;
+
+                    isProcessingMove = true;
                     dropToken(result.column, currentPlayer);
                     setTimeout(() => refreshProbabilityHints(), 40);
 
@@ -1303,6 +1382,7 @@
                 console.error('❌ Erreur IA vs IA:', error);
                 updateStatus('❌ Erreur dans le mode IA vs IA');
                 isAIThinking = false;
+                isProcessingMove = false;
                 gameActive = false;
             }
         }
@@ -1337,10 +1417,12 @@
                     } else if (pendingAIAction.type === 'drop') {
                         const col = pendingAIAction.column;
                         pendingAIAction = null;
+                        isProcessingMove = true;
                         dropToken(col, currentPlayer);
                     } else if (pendingAIAction.type === 'aiVsAiDrop') {
                         const col = pendingAIAction.column;
                         pendingAIAction = null;
+                        isProcessingMove = true;
                         dropToken(col, currentPlayer);
                         setTimeout(() => {
                             if (gameActive && gameMode === 'aivai') playAIVsAITurn();
@@ -1401,6 +1483,137 @@
             requestAISuggestion();
         });
 
+        document.getElementById('imageInput').addEventListener('change', analyzeImage);
+        
+        // ============================================================
+        // PREDICTION & IMAGE UPLOAD
+        // ============================================================
+        function hidePrediction() {
+            document.getElementById('predictionBadge').style.display = 'none';
+        }
+        
+        let currentPvBackup = [];
+        let isSimulating = false;
+
+        function showPrediction(prediction, pv = []) {
+            // Ne rien afficher si la partie est terminée
+            if (!gameActive) return;
+
+            const badge = document.getElementById('predictionBadge');
+            const pText = document.getElementById('predictionText');
+            badge.style.display = 'block';
+            
+            pText.innerHTML = `${prediction}`;
+            currentPvBackup = pv;
+
+            if (pv && pv.length > 0) {
+                // Ajouter +1 aux indices de colonnes pour affichage 1-9
+                const line = pv.map(c => c + 1).join(" ➔ ");
+                pText.innerHTML += `<br><span style="font-size: 0.8em; font-weight: normal;">Séquence restante prévue : ${line}</span>`;
+            }
+
+            // Si la prédiction n'est pas neutre et le mode n'est pas aivai, et partie continue
+            if (!prediction.toLowerCase().includes('incertain') && gameMode !== 'aivai' && gameActive) {
+                pText.innerHTML += `<br><button id="simBtn" onclick="simulatePredictionPV()" style="margin-top: 8px; padding: 6px 16px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); border-radius: 6px; color: white; cursor: pointer; font-weight: 600; font-size: 0.9em; backdrop-filter: blur(4px); transition: all 0.2s;">👁️ Lancer la simulation</button>`;
+            }
+            
+            // Styliser selon l'issue
+            if (prediction.startsWith('Victoire')) {
+                badge.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                badge.style.color = 'white';
+            } else if (prediction.startsWith('Défaite')) {
+                badge.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                badge.style.color = 'white';
+            } else if (prediction.startsWith('Coup')) {
+                badge.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+                badge.style.color = 'white';
+            } else {
+                badge.style.background = 'var(--surface)';
+                badge.style.color = '#333';
+            }
+        }
+        
+        function simulatePredictionPV() {
+            if (!gameActive) {
+                updateStatus('⚠️ Impossible de simuler : La partie est déjà terminée !');
+                return;
+            }
+
+            const btn = document.getElementById('simBtn');
+            if (btn) btn.style.display = 'none';
+            
+            // Basculer l'interface et le jeu en mode AI vs AI avec Minimax
+            document.getElementById('gameMode').value = 'aivai';
+            document.getElementById('aiType').value = 'minimax';
+            document.getElementById('depthRange').value = '6';
+            document.getElementById('depthValue').textContent = "6";
+            
+            gameMode = 'aivai';
+            aiType = 'minimax';
+            aiDepth = 6;
+            
+            isSimulating = true;
+            isProcessingMove = false; 
+            gameActive = true; 
+            
+            updateStatus('👁️ Simulation Minimax vs Minimax en cours...');
+            
+            // Lancer le combat d'IA
+            playAIVsAITurn();
+        }
+        
+        async function analyzeImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            updateStatus('📸 Traitement de l\'image et réflexion IA en cours...');
+            hidePrediction();
+            gameActive = true; 
+            
+            const formData = new FormData();
+            formData.append('image', file);
+            
+            try {
+                const response = await fetch('/api/analyze_image', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Update grid locally (frontend array)
+                    // grid from backend is [rows][cols], where row 0 is top of board.
+                    // Frontend grid: grid[0] = top visual row (wait, in connect4 `grid[0]` is often bottom in some implementations. Let's check: 
+                    // In your python `board.grid[rows - 1 - r][c] = grid_data[r][c]`. 
+                    // Wait, frontend `const cell = document.createElement('div'); cell.dataset.row = r;` where `r=0` is TOP.
+                    for (let r = 0; r < ROWS; r++) {
+                        for (let c = 0; c < COLS; c++) {
+                            grid[r][c] = result.grid[r][c];
+                        }
+                    }
+                    currentPlayer = result.next_player;
+                    renderBoard();
+                    showPrediction(result.prediction, result.pv);
+                    
+                    if (result.suggested_column !== null) {
+                        highlightSuggestedColumn(result.suggested_column);
+                    }
+                    updateStatus('✅ Analyse terminée. C\'est au ' + (currentPlayer === PLAYER1 ? 'Rouge 🔴' : 'Jaune 🟡') + ' de jouer.');
+                    
+                    // Vérifier si cette grille téléchargée contient DÉJÀ une victoire
+                    setTimeout(() => checkWinCondition(), 100);
+                    
+                } else {
+                    throw new Error(result.error);
+                }
+            } catch (error) {
+                console.error('❌ Erreur analyse:', error);
+                updateStatus('❌ Impossible d\'analyser l\'image.');
+            }
+            // Reset l'input pour pouvoir ré-uploader la même image
+            event.target.value = '';
+        }
+
         depthRange.addEventListener('input', (e) => {
             aiDepth = parseInt(e.target.value);
             depthValue.textContent = aiDepth;
@@ -1423,6 +1636,135 @@
                 refreshProbabilityHints();
             }
         });
+
+        // ============================================================
+        // FONCTIONS MODE ÉDITEUR
+        // ============================================================
+
+        editModeBtn.addEventListener('click', toggleEditMode);
+
+        function toggleEditMode() {
+            if (isReplayMode) return;
+
+            isEditMode = !isEditMode;
+            if (isEditMode) {
+                gameActive = false;
+                clearSuggestionHighlight();
+                hidePrediction();
+                
+                // Masquer contrôles normaux, afficher panneau éditeur
+                document.querySelector('.controls').style.display = 'none';
+                editorPanel.classList.add('active');
+                
+                updateStatus('🎨 Mode Éditeur : dessinez le plateau');
+            } else {
+                document.querySelector('.controls').style.display = 'flex';
+                editorPanel.classList.remove('active');
+            }
+        }
+
+        // Action de peindre une case
+        function paintCell(row, col) {
+            grid[row][col] = paintTool;
+            renderBoard();
+        }
+
+        // Sélection de l'outil
+        function setActivePaintTool(tool, btn) {
+            paintTool = tool;
+            [paintRedBtn, paintYellowBtn, paintEraseBtn].forEach(b => b.style.borderColor = 'transparent');
+            btn.style.borderColor = (tool === PLAYER1) ? '#ef4444' : ((tool === PLAYER2) ? '#f59e0b' : '#6b7280');
+        }
+
+        paintRedBtn.addEventListener('click', () => setActivePaintTool(PLAYER1, paintRedBtn));
+        paintYellowBtn.addEventListener('click', () => setActivePaintTool(PLAYER2, paintYellowBtn));
+        paintEraseBtn.addEventListener('click', () => setActivePaintTool(EMPTY, paintEraseBtn));
+
+        paintClearBtn.addEventListener('click', () => {
+            grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
+            renderBoard();
+            hidePrediction();
+        });
+
+        paintPlayBtn.addEventListener('click', async () => {
+            // 1. Appliquer la gravité
+            applyGravity();
+
+            // 2. Compter les pions pour déterminer le tour
+            let p1Count = 0;
+            let p2Count = 0;
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (grid[r][c] === PLAYER1) p1Count++;
+                    else if (grid[r][c] === PLAYER2) p2Count++;
+                }
+            }
+
+            currentPlayer = (p1Count > p2Count) ? PLAYER2 : PLAYER1;
+
+            // 3. Quitter mode édition & Lancer partie
+            isEditMode = false;
+            editorPanel.classList.remove('active');
+            document.querySelector('.controls').style.display = 'flex';
+            
+            gameActive = true;
+            isAIThinking = false;
+            isPaused = false;
+            moveHistory = []; // Reset l'historique car c'est une conf manuelle
+            
+            renderBoard();
+            
+            // Check win immédiat, au cas où le plateau édité soit déjà gagnant
+            try {
+                const response = await fetch('/api/check_win', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ grid })
+                });
+                const result = await response.json();
+                
+                if (result.game_over) {
+                    gameActive = false;
+                    if (result.winner) {
+                        const winnerName = result.winner === PLAYER1 ? 'Joueur 1 (Rouge 🔴)' : 'Joueur 2 (Jaune 🟡)';
+                        updateStatus(`🏆 ${winnerName} a gagné !`);
+                        highlightWinningLine(result.winning_line);
+                    } else if (result.is_draw) {
+                        updateStatus('🤝 Égalité - Plateau plein !');
+                    }
+                } else {
+                    updateStatus();
+                    refreshProbabilityHints();
+                    // Si c'est au tour de l'IA de jouer
+                    if (gameMode === 'pvai' && currentPlayer !== humanPlayer) {
+                        setTimeout(() => playAIMove(), 600);
+                    } else if (gameMode === 'aivai') {
+                        setTimeout(() => playAIVsAITurn(), 600);
+                    }
+                }
+            } catch(e) { console.error(e); }
+        });
+
+        function applyGravity() {
+            for (let c = 0; c < COLS; c++) {
+                let columnPieces = [];
+                // Récupérer de haut (idx 0) en bas (ROWS-1)
+                for (let r = 0; r < ROWS; r++) {
+                    if (grid[r][c] !== EMPTY) {
+                        columnPieces.push(grid[r][c]);
+                    }
+                }
+                
+                // Remplir de bas (ROWS-1) vers le haut
+                for (let r = ROWS - 1; r >= 0; r--) {
+                    if (columnPieces.length > 0) {
+                        grid[r][c] = columnPieces.pop();
+                    } else {
+                        grid[r][c] = EMPTY;
+                    }
+                }
+            }
+        }
 
         // ============================================================
         // FONCTIONS MODE REPLAY (clone du système local src/)
