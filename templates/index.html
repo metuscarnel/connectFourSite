@@ -606,6 +606,110 @@
                 scroll-behavior: auto !important;
             }
         }
+ 
+        /* ======================== PANNEAU SÉQUENCE PV ======================== */
+        #pvPanel {
+            display: none;
+            background: var(--surface);
+            border-radius: 14px;
+            padding: 14px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+            color: #1f2937;
+        }
+        #pvPanel .pv-title {
+            font-weight: bold;
+            font-size: 0.9rem;
+            color: #374151;
+            border-bottom: 2px solid rgba(102,126,234,.3);
+            padding-bottom: 8px;
+            margin-bottom: 8px;
+        }
+        #pvPanel .pv-conclusion {
+            text-align: center;
+            font-weight: bold;
+            font-size: 0.9rem;
+            padding: 7px 10px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg,#6366f1,#4f46e5);
+            color: #fff;
+        }
+        #pvPlayBtn {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg,#6366f1,#4f46e5);
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            transition: filter .2s;
+        }
+        #pvPlayBtn:hover { filter: brightness(1.12); }
+        .pv-row {
+            display: grid;
+            grid-template-columns: 28px 48px 1fr auto;
+            gap: 4px 8px;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 7px;
+            margin-bottom: 3px;
+            background: rgba(0,0,0,.03);
+            font-size: 0.78rem;
+        }
+        .pv-badge {
+            font-size: 0.7rem;
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .pv-badge.win      { background: #d1fae5; color: #065f46; }
+        .pv-badge.loss     { background: #fee2e2; color: #991b1b; }
+        .pv-badge.draw     { background: #e5e7eb; color: #374151; }
+        .pv-badge.unknown  { background: #f3f4f6; color: #6b7280; }
+        .pv-row:nth-child(even) { background: rgba(102,126,234,.06); }
+        .pv-row.pv-active {
+            background: rgba(99,102,241,.2) !important;
+            outline: 2px solid rgba(99,102,241,.5);
+            transform: scale(1.02);
+            transition: all .2s;
+        }
+        .pv-num  { font-weight: bold; color: #9ca3af; text-align: center; }
+        .pv-col  { background: rgba(102,126,234,.18); border-radius: 5px;
+                   padding: 2px 5px; font-weight: bold; color: #4f46e5; text-align: center; }
+        .pv-red  { color: #dc2626; font-weight: bold; }
+        .pv-yel  { color: #b45309; font-weight: bold; }
+
+        /* ======================== TOGGLE JOUEUR / IA ======================== */
+        #playerTypePanel {
+            display: none;
+            justify-content: center;
+            gap: 10px;
+            margin: 6px 0 4px;
+        }
+        .player-toggle-btn {
+            padding: 5px 14px;
+            border: 2px solid transparent;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.82rem;
+            cursor: pointer;
+            transition: all .2s;
+        }
+        .player-toggle-btn.human {
+            background: rgba(99,102,241,.15);
+            border-color: #6366f1;
+            color: #4f46e5;
+        }
+        .player-toggle-btn.ai {
+            background: rgba(16,185,129,.15);
+            border-color: #10b981;
+            color: #059669;
+        }
+        .player-toggle-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
     </style>
 </head>
 <body>
@@ -683,6 +787,12 @@
         <section class="board-zone">
             <div id="status">Cliquez sur "Nouvelle Partie" pour commencer !</div>
 
+            <!-- Panneau toggle Humain / IA par joueur -->
+            <div id="playerTypePanel">
+                <button id="p1ToggleBtn" class="player-toggle-btn human" onclick="togglePlayerType(1)">🤖 Passer Rouge à l'IA</button>
+                <button id="p2ToggleBtn" class="player-toggle-btn human" onclick="togglePlayerType(2)">🤖 Passer Jaune à l'IA</button>
+            </div>
+
             <div class="board-shell">
                 <div id="predictionBadge" style="display:none; text-align:center; padding: 10px; margin-bottom: 8px; border-radius: 10px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); background: var(--surface); color: #333; font-size: 1.1em;">
                     🔮 Prédiction IA : <span id="predictionText">Incertain</span>
@@ -704,6 +814,9 @@
             </section>
 
             <a href="/historique" class="history-link full" aria-label="Ouvrir l'historique des parties">📜 Voir l'historique des parties</a>
+
+            <!-- Panneau séquence PV (injecté après analyse image) -->
+            <div id="pvPanel"></div>
 
             <div class="footer">
                 <p>🚀 Connect4 By Métus | Flask + Python + JavaScript</p>
@@ -755,6 +868,48 @@
         let lastColumnScores = {};   // Derniers scores Minimax calculés
         let pendingAIAction = null;  // Action IA en attente (pour reprise après pause)
         let suggestedColumn = null;
+
+        // Toggle Humain / IA par joueur (modifiable pendant la partie)
+        let p1IsHuman = true;
+        let p2IsHuman = true;
+
+        function currentPlayerIsHuman() {
+            return currentPlayer === PLAYER1 ? p1IsHuman : p2IsHuman;
+        }
+
+        function togglePlayerType(playerNum) {
+            if (!gameActive) return;  // Ne fonctionne que pendant une partie
+            if (playerNum === 1) {
+                p1IsHuman = !p1IsHuman;
+            } else {
+                p2IsHuman = !p2IsHuman;
+            }
+            updatePlayerTypeUI();
+            // Si c'est maintenant le tour de l'IA, la déclencher
+            if (gameActive && !isPaused && !isAIThinking && !isProcessingMove && !currentPlayerIsHuman()) {
+                setTimeout(() => playAIMove(), 400);
+            }
+        }
+
+        function updatePlayerTypeUI() {
+            const panel = document.getElementById('playerTypePanel');
+            const btn1  = document.getElementById('p1ToggleBtn');
+            const btn2  = document.getElementById('p2ToggleBtn');
+            if (!panel) return;
+
+            // Afficher le panneau uniquement pendant une partie active
+            // Ce panneau est réservé au mode Joueur vs Joueur
+            panel.style.display = (gameActive && gameMode === 'pvp') ? 'flex' : 'none';
+
+            if (btn1) {
+                btn1.className = 'player-toggle-btn ' + (p1IsHuman ? 'human' : 'ai');
+                btn1.textContent = p1IsHuman ? '🤖 Passer Rouge à l\'IA' : '🎮 Reprendre Rouge (Humain)';
+            }
+            if (btn2) {
+                btn2.className = 'player-toggle-btn ' + (p2IsHuman ? 'human' : 'ai');
+                btn2.textContent = p2IsHuman ? '🤖 Passer Jaune à l\'IA' : '🎮 Reprendre Jaune (Humain)';
+            }
+        }
 
         // ============================================================
         // ÉTAT MODE ÉDITEUR
@@ -853,34 +1008,12 @@
         }
 
         async function refreshProbabilityHints() {
-            if (!gameActive || isReplayMode || gameMode === 'pvp') {
-                renderScores({});
-                return;
-            }
-
-            try {
-                const response = await fetch('/api/get_ai_move', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        grid,
-                        ai_type: 'ml',
-                        player: currentPlayer,
-                        depth: aiDepth
-                    })
-                });
-
-                const result = await response.json();
-                if (result.success && result.column_scores && Object.keys(result.column_scores).length > 0) {
-                    renderScores(result.column_scores, Number(result.column));
-                    if (suggestedColumn !== null) {
-                        highlightSuggestedColumn(suggestedColumn);
-                    }
-                }
-            } catch (error) {
-                console.warn('⚠️ Impossible de rafraichir les probabilités ML:', error);
-            }
+            // Les suggestions sont uniquement manuelles (via le bouton 💡).
+            // À chaque changement de joueur on efface les scores et surlignages précédents.
+            clearSuggestionHighlight();
+            renderScores({});
         }
+
 
         async function requestAISuggestion() {
             if (!gameActive || isPaused || isAIThinking || isReplayMode) {
@@ -939,6 +1072,17 @@
             hidePrediction();
 
             humanPlayer = parseInt(playerColorSelect.value, 10);
+
+            // Initialiser flags Humain/IA selon le mode
+            if (gameMode === 'pvp') {
+                p1IsHuman = true;  p2IsHuman = true;
+            } else if (gameMode === 'pvai') {
+                p1IsHuman = (humanPlayer === PLAYER1);
+                p2IsHuman = (humanPlayer === PLAYER2);
+            } else {
+                p1IsHuman = false; p2IsHuman = false;
+            }
+            updatePlayerTypeUI();
 
             // Mise à jour UI
             pauseBtn.textContent = '⏸️ Pause';
@@ -1091,8 +1235,8 @@
                 return;
             }
 
-            // En mode PvAI : joueur humain = PLAYER1 uniquement
-            if (gameMode === 'pvai' && currentPlayer !== humanPlayer) {
+            // En mode PvAI ou toggle : bloquer si ce n'est pas un humain qui joue
+            if (!currentPlayerIsHuman()) {
                 console.log('⛔ Clic ignoré : tour de l\'IA');
                 return;
             }
@@ -1103,9 +1247,7 @@
                 return;
             }
 
-            clearSuggestionHighlight();
-
-            // Jouer le coup
+            // Jouer le coup (les suggestions resteront visibles jusqu'au changement de joueur)
             isProcessingMove = true;
             const success = dropToken(col, currentPlayer);
             if (!success) {
@@ -1257,8 +1399,8 @@
             updateStatus();
             refreshProbabilityHints();
 
-            // Si mode PvAI et c'est le tour de l'IA
-            if (gameMode === 'pvai' && currentPlayer !== humanPlayer && gameActive) {
+            // Déclencher l'IA si le joueur suivant est contrôlé par l'IA
+            if (gameActive && !currentPlayerIsHuman() && gameMode !== 'aivai') {
                 if (!isPaused) {
                     setTimeout(() => playAIMove(), 600);
                 } else {
@@ -1272,7 +1414,8 @@
         // ============================================================
         async function playAIMove() {
             if (!gameActive || isAIThinking || isPaused) return;
-            if (gameMode === 'pvai' && currentPlayer === humanPlayer) return;
+            // Refuser si c'est le tour d'un humain (toggle ou mode pvai standard)
+            if (currentPlayerIsHuman() && gameMode !== 'aivai') return;
 
             isAIThinking = true;
             updateStatus('🤖 L\'IA réfléchit...');
@@ -1594,6 +1737,16 @@
                     currentPlayer = result.next_player;
                     renderBoard();
                     showPrediction(result.prediction, result.pv);
+
+                    // --- NOUVEAUTÉ : stocker la séquence pour le lecteur PV ---
+                    _pvInitGrid    = grid.map(r => [...r]);
+                    _pvMoves       = result.pv_moves     || [];
+                    _pvWinLine     = result.winning_line || [];
+                    _pvStep        = 0;
+                    _pvPlaying     = false;
+                    clearTimeout(_pvTimer);
+                    pvRender();
+                    // --- fin nouveauté ---
                     
                     if (result.suggested_column !== null) {
                         highlightSuggestedColumn(result.suggested_column);
@@ -1623,7 +1776,7 @@
 
         gameModeSelect.addEventListener('change', () => {
             syncBotInfo();
-            suggestBtn.disabled = gameModeSelect.value === 'pvp';
+            suggestBtn.disabled = gameModeSelect.value === 'aivai';
             refreshProbabilityHints();
         });
         aiTypeSelect.addEventListener('change', () => {
@@ -2042,8 +2195,8 @@
             humanPlayer = parseInt(playerColorSelect.value, 10);
             depthValue.textContent = aiDepth;
             syncBotInfo();
-            suggestBtn.disabled = gameMode === 'pvp';
-
+            suggestBtn.disabled = gameMode === 'aivai';
+            
             // Afficher le plateau vide
             renderBoard();
             renderScores({});
@@ -2062,6 +2215,122 @@
                 updateStatus('⚠️ Erreur : Aucun coup à rejouer');
             }
         });
+    </script>
+    <script>
+        // ================================================================
+        // LECTEUR DE LA SÉQUENCE PV (nouvelles fonctions, ne touche à rien d'existant)
+        // ================================================================
+        let _pvInitGrid = null;
+        let _pvMoves    = [];
+        let _pvWinLine  = [];
+        let _pvStep     = 0;
+        let _pvPlaying  = false;
+        let _pvTimer    = null;
+
+        function pvRender() {
+            const panel = document.getElementById('pvPanel');
+            if (!panel) return;
+            if (!_pvMoves || _pvMoves.length === 0) { panel.style.display = 'none'; return; }
+
+            // Conclusion globale
+            const lastMove  = _pvMoves[_pvMoves.length - 1];
+            const hasWinner = _pvWinLine && _pvWinLine.length > 0;
+            let conclusion  = hasWinner
+                ? `🏆 ${lastMove.name} gagne en ${_pvMoves.length} coup(s)` : `🤝 Match nul`;
+
+            let rows = '';
+            _pvMoves.forEach((m, i) => {
+                const cls = m.player === 1 ? 'pv-red' : 'pv-yel';
+                const pred = m.prediction || '';
+                let badgeCls = 'unknown';
+                if (pred === 'Victoire potentielle')  badgeCls = 'win';
+                else if (pred === 'D\u00e9faite potentielle') badgeCls = 'loss';
+                else if (pred === 'Nul potentiel')    badgeCls = 'draw';
+                const badge = pred ? `<span class="pv-badge ${badgeCls}">${pred}</span>` : '';
+                rows += `<div class="pv-row" id="pvr${i}"><span class="pv-num">#${m.move_num}</span>
+                         <span class="pv-col">Col.\xa0${m.column}</span>
+                         <span class="${cls}">${m.name}</span>${badge}</div>`;
+            });
+
+            panel.innerHTML = `
+                <div class="pv-title">🔍 Séquence optimale</div>
+                <div class="pv-conclusion">${conclusion}</div>
+                <button id="pvPlayBtn" onclick="pvToggle()">▶️ Lancer la simulation</button>
+                ${rows}`;
+            panel.style.display = 'block';
+            pvUpdateBtn();
+        }
+
+        function pvUpdateBtn() {
+            const btn = document.getElementById('pvPlayBtn');
+            if (!btn) return;
+            if (_pvPlaying) {
+                btn.textContent = '⏸️ Pause';
+                btn.style.background = 'linear-gradient(135deg,#f59e0b,#d97706)';
+            } else if (_pvStep > 0 && _pvStep >= _pvMoves.length) {
+                btn.textContent = '🔁 Rejouer';
+                btn.style.background = 'linear-gradient(135deg,#10b981,#059669)';
+            } else {
+                btn.textContent = '▶️ Lancer la simulation';
+                btn.style.background = 'linear-gradient(135deg,#6366f1,#4f46e5)';
+            }
+        }
+
+        function pvHighlight(idx) {
+            _pvMoves.forEach((_, i) => {
+                const el = document.getElementById('pvr' + i);
+                if (el) el.classList.toggle('pv-active', i === idx);
+            });
+        }
+
+        function pvToggle() {
+            if (!_pvMoves || _pvMoves.length === 0) return;
+            if (_pvStep >= _pvMoves.length) {
+                // Rejouer : réinitialiser le plateau au snapshot
+                grid = _pvInitGrid.map(r => [...r]);
+                renderBoard();
+                _pvStep = 0;
+                pvHighlight(-1);
+            }
+            if (_pvPlaying) {
+                _pvPlaying = false;
+                clearTimeout(_pvTimer);
+            } else {
+                _pvPlaying = true;
+                pvNext();
+            }
+            pvUpdateBtn();
+        }
+
+        function pvNext() {
+            if (!_pvPlaying || _pvStep >= _pvMoves.length) {
+                _pvPlaying = false;
+                pvUpdateBtn();
+                if (_pvStep >= _pvMoves.length && _pvWinLine && _pvWinLine.length > 0) {
+                    // Étape 5 : surligner la ligne gagnante
+                    highlightWinningLine(_pvWinLine);
+                    updateStatus('🏆 Ligne gagnante mise en évidence !');
+                } else if (_pvStep >= _pvMoves.length) {
+                    updateStatus('✅ Simulation terminée');
+                }
+                return;
+            }
+            const m   = _pvMoves[_pvStep];
+            const col = m.col_idx;
+            let row = ROWS - 1;
+            while (row >= 0 && grid[row][col] !== EMPTY) row--;
+            if (row >= 0) { grid[row][col] = m.player; }
+            renderBoard();
+            // Animation CSS
+            const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+            if (cell) cell.classList.add('dropping');
+            // Surligner la ligne dans le panneau
+            pvHighlight(_pvStep);
+            // Mettre à jour le statut
+            updateStatus(`🎮 Coup #${m.move_num} — ${m.name} joue colonne ${m.column}`);
+            _pvStep++;
+            _pvTimer = setTimeout(pvNext, 800);
+        }
     </script>
 </body>
 </html>

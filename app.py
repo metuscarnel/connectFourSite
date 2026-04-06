@@ -877,11 +877,61 @@ def analyze_image():
         elif board.is_full() or (best_score == 0 and len(board.get_valid_locations()) <= 2):
             prediction = "Nul"
 
+        # --- Simulation PV : liste ordonnée des coups + ligne gagnante finale ---
+        pv_moves = []
+        sim_board  = board.copy()
+        sim_player = player
+        winning_line = []
+
+        for i, col in enumerate(pv):
+            row = sim_board.get_next_open_row(col)
+            if row is None:
+                break
+            nom = "Rouge" if sim_player == PLAYER1 else "Jaune"
+            sim_board.drop_piece(row, col, sim_player)
+
+            # Prédiction locale après ce coup (minimax léger depth=4)
+            if sim_board.check_win(sim_player):
+                move_pred = "Victoire potentielle"
+            elif sim_board.is_full():
+                move_pred = "Nul potentiel"
+            else:
+                empty_count = len(sim_board.get_valid_locations())
+                if empty_count < 4:
+                    move_pred = "Nul potentiel"
+                else:
+                    _, _, local_score, _ = predict_move_with_minimax(sim_board, sim_player, depth=4)
+                    if local_score >= 10000:
+                        move_pred = "Victoire potentielle"
+                    elif local_score <= -10000:
+                        move_pred = "Défaite potentielle"
+                    else:
+                        move_pred = "Incertain"
+
+            pv_moves.append({
+                "move_num":   i + 1,
+                "column":     col + 1,
+                "col_idx":    col,
+                "player":     sim_player,
+                "name":       nom,
+                "prediction": move_pred
+            })
+            if sim_board.check_win(sim_player):
+                positions = sim_board.get_winning_positions(sim_player)
+                winning_line = [{"row": sim_board.rows - 1 - r, "col": c}
+                                for r, c in positions]
+                break
+            elif sim_board.is_full():
+                break
+            sim_player = PLAYER1 if sim_player == PLAYER2 else PLAYER2
+
         return jsonify({
             "success": True,
             "grid": grid_data,
             "next_player": player,
             "pv": pv,
+            "pv_moves": pv_moves,
+            "winning_line": winning_line,
             "prediction": prediction,
             "best_score": best_score,
             "suggested_column": column

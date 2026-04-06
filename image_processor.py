@@ -88,7 +88,7 @@ def _fallback_grid_detection(image):
     lower_yellow = np.array([20, 100, 100])
     upper_yellow = np.array([35, 255, 255])
     mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-
+    
     grid = []
     
     for y in row_centers:
