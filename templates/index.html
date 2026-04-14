@@ -1655,8 +1655,8 @@
                 pText.innerHTML += `<br><span style="font-size: 0.8em; font-weight: normal;">Séquence restante prévue : ${line}</span>`;
             }
 
-            // Si la prédiction n'est pas neutre et le mode n'est pas aivai, et partie continue
-            if (!prediction.toLowerCase().includes('incertain') && gameMode !== 'aivai' && gameActive) {
+            // Si la prédiction n'est pas neutre et le mode n'est pas aivai/pvp, et partie continue
+            if (!prediction.toLowerCase().includes('incertain') && gameMode !== 'aivai' && gameMode !== 'pvp' && gameActive) {
                 pText.innerHTML += `<br><button id="simBtn" onclick="simulatePredictionPV()" style="margin-top: 8px; padding: 6px 16px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); border-radius: 6px; color: white; cursor: pointer; font-weight: 600; font-size: 0.9em; backdrop-filter: blur(4px); transition: all 0.2s;">👁️ Lancer la simulation</button>`;
             }
             
@@ -2255,7 +2255,7 @@
             panel.innerHTML = `
                 <div class="pv-title">🔍 Séquence optimale</div>
                 <div class="pv-conclusion">${conclusion}</div>
-                <button id="pvPlayBtn" onclick="pvToggle()">▶️ Lancer la simulation</button>
+                ${gameMode !== 'pvp' ? '<button id="pvPlayBtn" onclick="pvToggle()">▶️ Lancer la simulation</button>' : ''}
                 ${rows}`;
             panel.style.display = 'block';
             pvUpdateBtn();

@@ -843,18 +843,22 @@ def analyze_image():
         # 2. Création de l'objet Board pour évaluer la situation
         board = Board(rows=ROWS, cols=COLS)
         
-        # Mapping sécurisé : la grille de l'image (dynamic rows/cols)
-        # est placée en bas et alignée à gauche de notre grille 8x9 temporelle
+        # 3. Mapping grille image -> Board
+        # image_processor renvoie [ligne_haut=0 ... ligne_bas=ROWS-1]
+        # Board.grid est [ligne_bas=0 ... ligne_haut=ROWS-1] (convention gravité)
+        # => Inversion nécessaire
         img_rows = len(grid_data)
         img_cols = len(grid_data[0]) if img_rows > 0 else 0
         
-        # On ne garde que les {ROWS} dernières lignes et {COLS} premières colonnes trouvées
-        for r in range(min(ROWS, img_rows)):
-            for c in range(min(COLS, img_cols)):
-                # grid_data[0] est le haut de l'image. board.grid[0] est le bas du jeu.
-                board_row_idx = r
-                img_row_idx = img_rows - 1 - r
-                board.grid[board_row_idx][c] = grid_data[img_row_idx][c]
+        if img_rows != ROWS or img_cols != COLS:
+            print(f"[WARN] Dimensions d'image mismatch: attendu {ROWS}x{COLS}, obtenu {img_rows}x{img_cols}")
+        
+        for img_row in range(img_rows):
+            for img_col in range(img_cols):
+                if img_row < ROWS and img_col < COLS:
+                    # img_row=0 (haut image) -> board_row=ROWS-1 (haut board)
+                    board_row = ROWS - 1 - img_row
+                    board.grid[board_row][img_col] = grid_data[img_row][img_col]
                 
         # 3. Évaluation du joueur actif (comptage des pions)
         p1_count = np.count_nonzero(board.grid == PLAYER1)
@@ -862,8 +866,8 @@ def analyze_image():
         player = PLAYER1 if p1_count <= p2_count else PLAYER2
         
         # 4. Prédiction Minimax pour les coups restants à la victoire
-        # On va chercher à profondeur 8 pour anticiper encore mieux lors d'une analyse d'image
-        column, column_scores, best_score, pv = predict_move_with_minimax(board, player, depth=8)
+        # Profondeur réduite à 4 pour garantir une réponse très rapide (sans perte de points pour le temps)
+        column, column_scores, best_score, pv = predict_move_with_minimax(board, player, depth=4)
         
         prediction = "Incertain"
         nb_coups = len(pv) if pv else 1
