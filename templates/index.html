@@ -1853,12 +1853,36 @@
                 }
             }
 
+            // ⚠️ VALIDATION : Vérifie que la différence de pions est valide (0 ou 1)
+            const pieceDiff = Math.abs(p1Count - p2Count);
+            if (pieceDiff > 1) {
+                updateStatus(`❌ ERREUR: Différence de ${pieceDiff} pions entre les joueurs! (Max 1 autorisé)`);
+                return; // Ne pas lancer la partie
+            }
+
             currentPlayer = (p1Count > p2Count) ? PLAYER2 : PLAYER1;
 
             // 3. Quitter mode édition & Lancer partie
             isEditMode = false;
             editorPanel.classList.remove('active');
             document.querySelector('.controls').style.display = 'flex';
+            
+            // Mettre à jour le mode de jeu depuis les sélecteurs
+            gameMode = gameModeSelect.value;
+            aiType = aiTypeSelect.value;
+            aiDepth = parseInt(depthRange.value);
+            humanPlayer = parseInt(playerColorSelect.value, 10);
+            
+            // Initialiser flags Humain/IA selon le mode
+            if (gameMode === 'pvp') {
+                p1IsHuman = true;  p2IsHuman = true;
+            } else if (gameMode === 'pvai') {
+                p1IsHuman = (humanPlayer === PLAYER1);
+                p2IsHuman = (humanPlayer === PLAYER2);
+            } else {
+                p1IsHuman = false; p2IsHuman = false;
+            }
+            updatePlayerTypeUI();
             
             gameActive = true;
             isAIThinking = false;
