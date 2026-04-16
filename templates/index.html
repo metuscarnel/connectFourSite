@@ -305,9 +305,9 @@
             box-shadow: 0 15px 50px rgba(0,0,0,0.4);
             display: grid;
             grid-template-columns: repeat(9, 1fr);
-            grid-template-rows: repeat(8, 1fr);
+            grid-template-rows: repeat(9, 1fr);
             gap: clamp(4px, 1vw, 8px);
-            aspect-ratio: 9 / 8;
+            aspect-ratio: 1 / 1;
             overflow: hidden;
         }
 
@@ -860,7 +860,7 @@
         // ============================================================
         // CONFIGURATION - Clone exact du jeu local (src/utils/constants.py)
         // ============================================================
-        const ROWS = 8;      // Identique à src/utils/constants.py
+        const ROWS = 9;      // Identique à src/utils/constants.py
         const COLS = 9;      // Identique à src/utils/constants.py
         const EMPTY = 0;
         const PLAYER1 = 1;   // Rouge
@@ -1748,7 +1748,7 @@
             
             const result = lastPredictionResult;
             const resultDiv = document.getElementById('predictionResults');
-            resultDiv.innerHTML = '⏳ Affichage de l'animation...';
+            resultDiv.innerHTML = "⏳ Affichage de l'animation...";
             
             // Séparer coups importés et simulés
             const initialMoves = result.all_moves.substring(0, result.initial_moves);
@@ -2602,6 +2602,7 @@
             _pvStep++;
             _pvTimer = setTimeout(pvNext, 800);
         }
+
     </script>
 </body>
 </html>
