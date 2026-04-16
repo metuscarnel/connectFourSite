@@ -487,26 +487,25 @@ def predict_move_with_minimax(board: Board, player: int, depth: int) -> Tuple[Op
 # ============================================================
 # CONFIGURATION BASE DE DONNÉES (variables d'environnement)
 # ============================================================
-# Valeurs par défaut pour le développement local
-DB_HOST = os.getenv('DB_HOST', 'mysql-metuscarnel.alwaysdata.net')
-DB_USER = os.getenv('DB_USER', 'metuscarnel')
-# Supporte DB_PASS (Render) OU DB_PASSWORD (legacy)
-DB_PASS = os.getenv('DB_PASS') or os.getenv('DB_PASSWORD', '$Maestro137#')
-DB_NAME = os.getenv('DB_NAME', 'metuscarnel_connect4')
-DB_PORT = int(os.getenv('DB_PORT', '3306'))
+# ✅ CONNEXION ALWAYSDATA (FIXE)
+DB_HOST = 'mysql-metuscarnel.alwaysdata.net'
+DB_USER = 'metuscarnel'
+DB_PASS = '$Maestro137#'
+DB_NAME = 'metuscarnel_connect4'
+DB_PORT = 3306
 
 # Détection source des variables (env ou défaut)
 def _get_var_source(var_name, default):
-    return '✅ ENV' if os.getenv(var_name) else '⚠️ DEFAULT'
+    return '✅ ALWAYSDATA (fixe)'
 
 # Log de configuration au démarrage (sans mot de passe !)
 print(f"\n{'='*50}")
 print("📊 Configuration Base de Données:")
-print(f"   Hôte: {DB_HOST} [{_get_var_source('DB_HOST', 'mysql-metuscarnel.alwaysdata.net')}]")
-print(f"   User: {DB_USER} [{_get_var_source('DB_USER', '')}]")
-print(f"   Pass: {'*' * len(DB_PASS)} [{_get_var_source('DB_PASS', '') if os.getenv('DB_PASS') else _get_var_source('DB_PASSWORD', '')}]")
-print(f"   Base: {DB_NAME} [{_get_var_source('DB_NAME', '')}]")
+print(f"   Hôte: {DB_HOST} [✅ ALWAYSDATA]")
+print(f"   User: {DB_USER}")
+print(f"   Base: {DB_NAME}")
 print(f"   Port: {DB_PORT}")
+print(f"   ✅ Modèles ML chargés (si dispo)")
 print(f"{'='*50}\n")
 
 
@@ -1006,6 +1005,443 @@ def check_win():
     except Exception as e:
         print(f"[API ERROR] check_win: {e}")
         return jsonify({"game_over": False, "error": str(e)}), 500
+
+
+@app.route('/api/analyze_position', methods=['POST'])
+def analyze_position():
+    """Analyse un plateau et prédit le gagnant et le nombre de coups."""
+    try:
+        data = request.get_json()
+        grid = data.get('grid', [])
+        current_player = data.get('current_player', PLAYER1)
+        depth = data.get('depth', 4)
+        
+        if not grid or len(grid) != ROWS or any(len(row) != COLS for row in grid):
+            return jsonify({"error": "Grille invalide"}), 400
+        
+        # Créer un board depuis la grille
+        board = Board(ROWS, COLS)
+        for r in range(ROWS):
+            for c in range(COLS):
+                board.grid[r][c] = grid[r][c]
+        
+        # Vérifier s'il y a déjà un gagnant
+        if board.check_win(PLAYER1):
+            return jsonify({
+                "winner": "Joueur 1 (Rouge 🔴)",
+                "moves_to_win": 0,
+                "prediction": "Rouge a déjà gagné !",
+                "game_over": True
+            })
+        
+        if board.check_win(PLAYER2):
+            return jsonify({
+                "winner": "Joueur 2 (Jaune 🟡)",
+                "moves_to_win": 0,
+                "prediction": "Jaune a déjà gagné !",
+                "game_over": True
+            })
+        
+        if board.is_full():
+            return jsonify({
+                "winner": "Égalité",
+                "moves_to_win": 0,
+                "prediction": "Plateau plein - Égalité !",
+                "game_over": True
+            })
+        
+        # Analyser la position avec Minimax pour PLAYER1
+        ai_p1 = MinimaxAI(depth=depth)
+        ai_p1.set_player(PLAYER1)
+        best_col_p1, score_p1, _ = ai_p1.minimax(board, depth, float('-inf'), float('inf'), True)
+        
+        # Analyser la position avec Minimax pour PLAYER2
+        ai_p2 = MinimaxAI(depth=depth)
+        ai_p2.set_player(PLAYER2)
+        best_col_p2, score_p2, _ = ai_p2.minimax(board, depth, float('-inf'), float('inf'), True)
+        
+        # Déterminer le gagnant probable
+        if score_p1 > score_p2 + 100:
+            winner = "Joueur 1 (Rouge 🔴)"
+        elif score_p2 > score_p1 + 100:
+            winner = "Joueur 2 (Jaune 🟡)"
+        else:
+            winner = "Indéterminé (partie équilibrée)"
+        
+        # Estimer le nombre de coups
+        # Compter les pions actuels
+        p1_count = sum(row.count(PLAYER1) for row in grid)
+        p2_count = sum(row.count(PLAYER2) for row in grid)
+        total_pieces = p1_count + p2_count
+        max_pieces = ROWS * COLS
+        
+        # Nombre de coups estimé jusqu'à fin
+        moves_to_end = max_pieces - total_pieces
+        moves_to_win = min(moves_to_end, 15)  # Max 15 coups estimés
+        
+        return jsonify({
+            "winner": winner,
+            "moves_to_win": moves_to_win,
+            "prediction": f"{winner} devrait gagner en ~{moves_to_win} coups",
+            "score_p1": int(score_p1),
+            "score_p2": int(score_p2),
+            "game_over": False
+        })
+    
+    except Exception as e:
+        print(f"[API ERROR] analyze_position: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/import_game', methods=['POST'])
+def import_game():
+    """Importe une partie au format TXT (colonnes jouées)."""
+    try:
+        data = request.get_json()
+        moves_str = data.get('moves', '').strip()
+        
+        if not moves_str or not moves_str.isdigit():
+            return jsonify({"error": "Format invalide. Exemple: '4534562'"}), 400
+        
+        # Convertir les colonnes en partie
+        board = Board(ROWS, COLS)
+        moves_base0 = []
+        
+        for i, col_char in enumerate(moves_str):
+            col = int(col_char) - 1  # Convertir base 1 -> base 0
+            
+            # Vérifier colonne valide
+            if col < 0 or col >= COLS:
+                return jsonify({"error": f"Colonne invalide: {int(col_char)}"}), 400
+            
+            # Vérifier si la colonne est pleine
+            if not board.is_valid_location(col):
+                return jsonify({"error": f"Colonne {int(col_char)} pleine au coup {i+1}"}), 400
+            
+            # Placer le pion
+            current_player = PLAYER1 if i % 2 == 0 else PLAYER2
+            row = board.get_next_open_row(col)
+            board.drop_piece(row, col, current_player)
+            moves_base0.append(col)
+            
+            # Vérifier victoire
+            if board.check_win(current_player):
+                # Partie terminée
+                break
+        
+        # Vérifier si plateau plein
+        is_draw = board.is_full()
+        
+        # Parser pour BDD (convert to base 1)
+        moves_base1 = ''.join(str(c + 1) for c in moves_base0)
+        
+        # Sauvegarder en BDD
+        if not db_manager.connect():
+            return jsonify({"success": False, "error": "Connexion BDD échouée"}), 500
+        
+        db_manager.create_tables()
+        game_id = db_manager.insert_game(
+            coups=moves_base1,
+            mode_jeu="IMPORT_TXT",
+            statut="TERMINEE",
+            ligne_gagnante=None
+        )
+        
+        db_manager.disconnect()
+        
+        return jsonify({
+            "success": True,
+            "game_id": game_id,
+            "moves_count": len(moves_base0),
+            "message": f"Partie importée avec {len(moves_base0)} coups"
+        })
+    
+    except Exception as e:
+        print(f"[API ERROR] import_game: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/train_model_from_db', methods=['POST'])
+def train_model_from_db():
+    """Entraîne un modèle ML à partir des parties en BDD."""
+    try:
+        if not db_manager.connect():
+            return jsonify({"error": "Connexion BDD échouée"}), 500
+        
+        db_manager.create_tables()
+        games = db_manager.get_all_games()
+        db_manager.disconnect()
+        
+        if not games or len(games) < 10:
+            return jsonify({
+                "error": f"Insuffisant de parties pour entraîner ({len(games)} < 10)"
+            }), 400
+        
+        # Préparer les données pour ML
+        X = []  # Features
+        y_winner = []  # Target: gagnant (0=Red, 1=Yellow)
+        y_moves = []  # Target: coups jusqu'à fin
+        
+        for game in games:
+            moves_str = game.get('coups', '')
+            if not moves_str:
+                continue
+            
+            # Replay la partie
+            board = Board(ROWS, COLS)
+            move_count = 0
+            winner = None
+            
+            for i, col_char in enumerate(moves_str):
+                col = int(col_char) - 1
+                if col < 0 or col >= COLS:
+                    break
+                
+                if not board.is_valid_location(col):
+                    break
+                
+                current_player = PLAYER1 if i % 2 == 0 else PLAYER2
+                row = board.get_next_open_row(col)
+                if row is None:
+                    break
+                
+                board.drop_piece(row, col, current_player)
+                move_count += 1
+                
+                # Vérifier victoire
+                if board.check_win(current_player):
+                    winner = current_player
+                    break
+            
+            # Feature: évaluation Minimax de la position finale
+            ai = MinimaxAI(depth=2)
+            ai.set_player(PLAYER1)
+            score = ai.score_position(board, PLAYER1)
+            
+            # Compter pions
+            p1_count = int(np.sum(board.grid == PLAYER1))
+            p2_count = int(np.sum(board.grid == PLAYER2))
+            
+            # Vecteur de features
+            features = [p1_count, p2_count, score, move_count]
+            X.append(features)
+            
+            # Targets
+            if winner == PLAYER1:
+                y_winner.append(0)
+            elif winner == PLAYER2:
+                y_winner.append(1)
+            else:
+                y_winner.append(2)  # Égalité
+            
+            y_moves.append(min(move_count, 60))  # Max 60 coups
+        
+        if len(X) < 5:
+            return jsonify({"error": "Trop peu de données valides"}), 400
+        
+        # Convertir en array numpy
+        from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+        X_array = np.array(X)
+        y_winner_array = np.array(y_winner)
+        y_moves_array = np.array(y_moves)
+        
+        # Entraîner modèle de gagnant
+        model_winner = RandomForestClassifier(n_estimators=100, random_state=42)
+        model_winner.fit(X_array, y_winner_array)
+        
+        # Entraîner modèle de coups
+        model_moves = RandomForestRegressor(n_estimators=100, random_state=42)
+        model_moves.fit(X_array, y_moves_array)
+        
+        # Sauvegarder modèles
+        joblib.dump(model_winner, 'model_winner.joblib')
+        joblib.dump(model_moves, 'model_moves.joblib')
+        
+        return jsonify({
+            "success": True,
+            "games_processed": len(X),
+            "model_winner_accuracy": float(model_winner.score(X_array, y_winner_array)),
+            "model_moves_r2": float(model_moves.score(X_array, y_moves_array)),
+            "message": "Modèles entraînés et sauvegardés"
+        })
+    
+    except Exception as e:
+        print(f"[API ERROR] train_model_from_db: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/predict_ml', methods=['POST'])
+def predict_ml():
+    """Prédit le gagnant et coups avec le modèle ML."""
+    try:
+        data = request.get_json()
+        grid = data.get('grid', [])
+        
+        if not grid:
+            return jsonify({"error": "Grille manquante"}), 400
+        
+        # Charger modèles
+        try:
+            model_winner = joblib.load('model_winner.joblib')
+            model_moves = joblib.load('model_moves.joblib')
+        except:
+            return jsonify({
+                "error": "Modèles non entraînés. Appelez /api/train_model_from_db d'abord"
+            }), 400
+        
+        # Créer board depuis grid
+        board = Board(ROWS, COLS)
+        for r in range(ROWS):
+            for c in range(COLS):
+                board.grid[r][c] = grid[r][c]
+        
+        # Créer features
+        p1_count = sum(row.count(PLAYER1) for row in board.grid)
+        p2_count = sum(row.count(PLAYER2) for row in board.grid)
+        
+        ai = MinimaxAI(depth=2)
+        ai.set_player(PLAYER1)
+        score = ai.score_position(board, PLAYER1)
+        
+        move_count = p1_count + p2_count
+        
+        features = np.array([[p1_count, p2_count, score, move_count]])
+        
+        # Prédictions
+        winner_pred = model_winner.predict(features)[0]
+        moves_pred = int(model_moves.predict(features)[0])
+        
+        # Convertir résultats
+        winner_map = {0: "Joueur 1 (Rouge 🔴)", 1: "Joueur 2 (Jaune 🟡)", 2: "Égalité"}
+        winner_name = winner_map.get(winner_pred, "Indéterminé")
+        
+        # Probabilités
+        winner_proba = model_winner.predict_proba(features)[0]
+        
+        return jsonify({
+            "success": True,
+            "winner": winner_name,
+            "moves_to_win": max(1, moves_pred),
+            "prediction": f"{winner_name} devrait gagner en ~{max(1, moves_pred)} coups",
+            "confidence": float(max(winner_proba)),
+            "probabilities": {
+                "red_wins": float(winner_proba[0]),
+                "yellow_wins": float(winner_proba[1]) if len(winner_proba) > 1 else 0.0,
+                "draw": float(winner_proba[2]) if len(winner_proba) > 2 else 0.0
+            }
+        })
+    
+    except Exception as e:
+        print(f"[API ERROR] predict_ml: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/predict_and_simulate', methods=['POST'])
+def predict_and_simulate():
+    """Simule la partie avec 2 IA Minimax - retourne le gagnant et les coups totaux."""
+    try:
+        data = request.get_json()
+        moves_str = data.get('moves', '').strip()
+        
+        if not moves_str or not moves_str.isdigit():
+            return jsonify({"error": "Format invalide. Exemple: '2322786762'"}), 400
+        
+        # 1️⃣ REJOUER LA SITUATION PARTIELLE
+        board = Board(ROWS, COLS)
+        moves_count = 0
+        
+        for i, col_char in enumerate(moves_str):
+            col = int(col_char) - 1  # Base 1 -> Base 0
+            
+            if col < 0 or col >= COLS or not board.is_valid_location(col):
+                return jsonify({"error": f"Position invalide au coup {i+1}"}), 400
+            
+            current_player = PLAYER1 if i % 2 == 0 else PLAYER2
+            row = board.get_next_open_row(col)
+            if row is None:
+                return jsonify({"error": f"Colonne {int(col_char)} pleine"}), 400
+            
+            board.drop_piece(row, col, current_player)
+            moves_count += 1
+            
+            # Vérifier victoire prématurée
+            if board.check_win(current_player):
+                return jsonify({
+                    "success": True,
+                    "winner": "🔴 Rouge" if current_player == PLAYER1 else "🟡 Jaune",
+                    "total_moves": moves_count,
+                    "initial_moves": moves_count,
+                    "remaining_moves": 0,
+                    "winner_moves": moves_count if current_player == PLAYER1 else moves_count - 1 if moves_count > 0 else 0,
+                    "all_moves": moves_str,
+                    "winning_positions": board.get_winning_positions(current_player),
+                    "status": "Partie déjà terminée!"
+                }), 200
+        
+        # 2️⃣ SIMULATION - 2 IA Minimax jouent le reste
+        board_sim = board.copy()
+        sim_moves_limit = 72 - moves_count  # Max coups restants
+        winner = None
+        total_moves = moves_count
+        simulated_moves = ""  # Tracer les coups simulés
+        winning_positions = []  # Positions de la ligne gagnante
+        winner_move_count = 0  # Nombre de coups du gagnant
+        
+        for sim_move in range(sim_moves_limit):
+            current_player = PLAYER1 if (moves_count + sim_move) % 2 == 0 else PLAYER2
+            
+            # IA Minimax joue
+            ai_sim = MinimaxAI(depth=3)
+            ai_sim.set_player(current_player)
+            best_col, _, _ = ai_sim.minimax(board_sim, 3, float('-inf'), float('inf'), True)
+            
+            if best_col is None:
+                # Plateau plein
+                winner = "Égalité"
+                break
+            
+            row = board_sim.get_next_open_row(best_col)
+            if row is None:
+                winner = "Égalité"
+                break
+            
+            board_sim.drop_piece(row, best_col, current_player)
+            simulated_moves += str(best_col + 1)  # Convertir base 0 -> base 1
+            total_moves += 1
+            
+            # Victoire?
+            if board_sim.check_win(current_player):
+                winner = "🔴 Rouge" if current_player == PLAYER1 else "🟡 Jaune"
+                # Trouver les 4 pions alignés
+                winning_positions = board_sim.get_winning_positions(current_player)
+                
+                # Compter les coups du gagnant dans la simulation
+                # sim_move est 0-indexed, donc on a sim_move+1 coups au total en simulation
+                if current_player == PLAYER1:  # Rouge joue en premier (indices pairs: 0,2,4...)
+                    winner_move_count = (sim_move // 2) + 1
+                else:  # Jaune joue en second (indices impairs: 1,3,5...)
+                    winner_move_count = ((sim_move + 1) // 2)
+                break
+        
+        if winner is None:
+            winner = "Égalité"
+        
+        all_moves = moves_str + simulated_moves
+        
+        return jsonify({
+            "success": True,
+            "winner": winner,
+            "total_moves": int(total_moves),
+            "initial_moves": int(moves_count),
+            "remaining_moves": int(total_moves - moves_count),
+            "winner_moves": int(winner_move_count) if winner_move_count > 0 else int(total_moves // 2),
+            "all_moves": all_moves,
+            "winning_positions": winning_positions
+        })
+    
+    except Exception as e:
+        print(f"[API ERROR] predict_and_simulate: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/save', methods=['POST'])

@@ -744,6 +744,22 @@
     </div>
 
     <div class="controls">
+        <!-- Section ML Training & Import -->
+        <div class="control-group" style="border: 2px solid #8b5cf6; padding: 12px; border-radius: 8px; background: rgba(139, 92, 246, 0.1);">
+            <details style="cursor: pointer;">
+                <summary style="font-weight: bold; color: #8b5cf6; padding: 5px;">🔮 Prédire</summary>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #8b5cf6;">
+                    <!-- Import partie TXT -->
+                    <div class="control-group">
+                        <label for="importMovesInput">📥 Entrez une suite de coups, puis cliquez "Prédire"</label>
+                        <input type="text" id="importMovesInput" placeholder="Exemple: 234567 ou 345678912345678" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 5px; margin: 5px 0;">
+                        <button onclick="predictAndSimulate()" style="width: 100%; background: #8b5cf6; color: white; padding: 8px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 1em;">🔮 Prédire</button>
+                        <div id="predictionResults" style="margin-top: 10px; padding: 12px; background: white; border-radius: 5px; font-size: 0.9em; display: none; color: #333; border-left: 4px solid #8b5cf6;"></div>
+                    </div>
+                </div>
+            </details>
+        </div>
+
         <div class="control-group">
             <label for="gameMode">Mode de jeu</label>
             <select id="gameMode">
@@ -1576,6 +1592,215 @@
         }
 
         // ============================================================
+        // MACHINE LEARNING - IMPORT & TRAINING & PREDICTION
+        // ============================================================
+        
+        // Affiche progressivement les coups sur le plateau
+        // Affiche les coups progressivement avec animation (importés puis simulés)
+        async function displayBoardWithMovesAnimated(initialMoves, simulatedMoves, winningPositions = []) {
+            grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
+            renderBoard();
+            
+            let currentPlayer = PLAYER1;
+            
+            // 1️⃣ AFFICHER LES COUPS IMPORTÉS UN PAR UN
+            updateStatus(`1️⃣ PHASE 1: Affichage des ${initialMoves.length} coups importés...`);
+            boardElement.style.opacity = '0.9';
+            const importedCols = initialMoves.split('').map(c => parseInt(c) - 1);
+            
+            for (let col of importedCols) {
+                if (col < 0 || col >= COLS) continue;
+                for (let row = ROWS - 1; row >= 0; row--) {
+                    if (grid[row][col] === EMPTY) {
+                        grid[row][col] = currentPlayer;
+                        currentPlayer = currentPlayer === PLAYER1 ? PLAYER2 : PLAYER1;
+                        renderBoard();
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                        break;
+                    }
+                }
+            }
+            
+            // 2️⃣ AFFICHER LES COUPS SIMULÉS UN PAR UN
+            updateStatus(`2️⃣ PHASE 2: Affichage des ${simulatedMoves.length} coups simulés (IA Minimax)...`);
+            boardElement.style.opacity = '1';
+            const simulatedCols = simulatedMoves.split('').map(c => parseInt(c) - 1);
+            
+            for (let col of simulatedCols) {
+                if (col < 0 || col >= COLS) continue;
+                for (let row = ROWS - 1; row >= 0; row--) {
+                    if (grid[row][col] === EMPTY) {
+                        grid[row][col] = currentPlayer;
+                        currentPlayer = currentPlayer === PLAYER1 ? PLAYER2 : PLAYER1;
+                        renderBoard();
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                        break;
+                    }
+                }
+            }
+            
+            // 3️⃣ METTRE EN ÉVIDENCE LA LIGNE GAGNANTE
+            updateStatus(`3️⃣ PHASE 3: Mise en évidence de la ligne gagnante...`);
+            if (winningPositions && winningPositions.length > 0) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                for (let [pythonRow, col] of winningPositions) {
+                    const jsRow = ROWS - 1 - pythonRow;
+                    const cell = document.querySelector(`[data-row="${jsRow}"][data-col="${col}"]`);
+                    if (cell) {
+                        cell.style.boxShadow = '0 0 20px 3px #FFD700, inset 0 0 10px rgba(255, 215, 0, 0.8)';
+                        cell.style.transform = 'scale(1.1)';
+                    }
+                }
+            }
+        }
+
+        function displayBoardWithMoves(moves, winningPositions = []) {
+            // Initialiser grille vide
+            grid = Array(ROWS).fill().map(() => Array(COLS).fill(EMPTY));
+            
+            // Colonnes (1-9 → 0-8)
+            const columns = moves.split('').map(c => parseInt(c) - 1);
+            let currentPlayer = PLAYER1; // Rouge commence
+            
+            // Placer les pions
+            for (let col of columns) {
+                if (col < 0 || col >= COLS) continue;
+                
+                // Trouver la ligne où placer le pion (de bas en haut)
+                for (let row = ROWS - 1; row >= 0; row--) {
+                    if (grid[row][col] === EMPTY) {
+                        grid[row][col] = currentPlayer;
+                        currentPlayer = currentPlayer === PLAYER1 ? PLAYER2 : PLAYER1;
+                        break;
+                    }
+                }
+            }
+            
+            renderBoard();
+            
+            // Mettre en évidence les pions gagnants
+            if (winningPositions && winningPositions.length > 0) {
+                setTimeout(() => {
+                    for (let [pythonRow, col] of winningPositions) {
+                        // Convertir Python row (bas=0) en JS row (haut=0)
+                        const jsRow = ROWS - 1 - pythonRow;
+                        const cell = document.querySelector(`[data-row="${jsRow}"][data-col="${col}"]`);
+                        if (cell) {
+                            cell.style.boxShadow = '0 0 20px 3px #FFD700, inset 0 0 10px rgba(255, 215, 0, 0.8)';
+                            cell.style.transform = 'scale(1.1)';
+                        }
+                    }
+                }, 100);
+            }
+        }
+
+        let lastPredictionResult = null;
+
+        async function predictAndSimulate() {
+            const movesInput = document.getElementById('importMovesInput');
+            const moves = movesInput.value.trim();
+            
+            if (!moves || !/^\d+$/.test(moves)) {
+                alert('❌ Format invalide! Exemple: 2322786762');
+                return;
+            }
+            
+            const resultDiv = document.getElementById('predictionResults');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ Calcul de la prédiction avec 2 IA Minimax...';
+            
+            updateStatus('🎮 Simulation en cours...');
+            
+            try {
+                const response = await fetch('/api/predict_and_simulate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ moves })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Stocker le résultat pour l'animation ultérieure
+                    lastPredictionResult = result;
+                    
+                    // Afficher le résultat + bouton pour voir l'animation
+                    resultDiv.innerHTML = `
+                        <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
+                            <h2 style="margin: 0 0 15px 0; font-size: 28px;">🎉 ${result.winner} gagne en ${result.remaining_moves} coup${result.remaining_moves > 1 ? 's' : ''} simulé${result.remaining_moves > 1 ? 's' : ''}!</h2>
+                            <button onclick="showPredictionAnimation()" style="background: #4CAF50; color: white; border: none; padding: 12px 30px; border-radius: 5px; font-size: 16px; cursor: pointer; transition: 0.3s;">▶️ Voir l'animation</button>
+                        </div>
+                    `;
+                    
+                    updateStatus(`✅ Prédiction calculée! ${result.winner} gagne en ${result.remaining_moves} coups.`);
+                } else {
+                    resultDiv.innerHTML = `❌ ${result.error}`;
+                    updateStatus(`❌ ${result.error}`);
+                }
+            } catch (e) {
+                console.error(e);
+                resultDiv.innerHTML = `❌ Erreur: ${e.message}`;
+                updateStatus('❌ Erreur réseau');
+            }
+        }
+
+        async function showPredictionAnimation() {
+            if (!lastPredictionResult) return;
+            
+            const result = lastPredictionResult;
+            const resultDiv = document.getElementById('predictionResults');
+            resultDiv.innerHTML = '⏳ Affichage de l'animation...';
+            
+            // Séparer coups importés et simulés
+            const initialMoves = result.all_moves.substring(0, result.initial_moves);
+            const simulatedMoves = result.all_moves.substring(result.initial_moves);
+            
+            // Afficher avec animation
+            await displayBoardWithMovesAnimated(initialMoves, simulatedMoves, result.winning_positions);
+            
+            // Re-afficher le résultat et le bouton après animation
+            resultDiv.innerHTML = `
+                <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
+                    <h2 style="margin: 0; font-size: 28px;">🎉 ${result.winner} gagne en ${result.remaining_moves} coup${result.remaining_moves > 1 ? 's' : ''} simulé${result.remaining_moves > 1 ? 's' : ''}!</h2>
+                </div>
+            `;
+            
+            updateStatus(`🎉 Animation terminée! ${result.winner} gagne en ${result.remaining_moves} coups.`);
+        }
+
+        async function importGameFromTxt() {
+            const movesInput = document.getElementById('importMovesInput');
+            const moves = movesInput.value.trim();
+            
+            if (!moves || !/^\d+$/.test(moves)) {
+                alert('❌ Format invalide! Exemple: 4534562 (colonnes 1-9 uniquement)');
+                return;
+            }
+            
+            updateStatus('📥 Importation de la partie...');
+            
+            try {
+                const response = await fetch('/api/import_game', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ moves })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    updateStatus(`✅ Partie importée! ID: ${result.game_id} - ${result.moves_count} coups`);
+                    movesInput.value = '';
+                    alert(`✅ Partie importée avec succès!\n🎮 ${result.message}`);
+                } else {
+                    updateStatus(`❌ Erreur: ${result.error}`);
+                    alert(`❌ ${result.error}`);
+                }
+            } catch (e) {
+                console.error(e);
+                updateStatus('❌ Erreur réseau');
+            }
+        }
+
+        // ============================================================
         // MISE À JOUR DU STATUT
         // ============================================================
         function updateStatus(message = null) {
@@ -1910,13 +2135,35 @@
                         updateStatus('🤝 Égalité - Plateau plein !');
                     }
                 } else {
-                    updateStatus();
-                    refreshProbabilityHints();
-                    // Si c'est au tour de l'IA de jouer
-                    if (gameMode === 'pvai' && currentPlayer !== humanPlayer) {
-                        setTimeout(() => playAIMove(), 600);
-                    } else if (gameMode === 'aivai') {
-                        setTimeout(() => playAIVsAITurn(), 600);
+                    // 📊 Analyser la position pour prédiction du gagnant
+                    updateStatus('🔮 Analyse de la position en cours...');
+                    
+                    const analysisResponse = await fetch('/api/analyze_position', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            grid,
+                            current_player: currentPlayer,
+                            depth: aiDepth 
+                        })
+                    });
+                    const analysis = await analysisResponse.json();
+                    
+                    // Afficher la prédiction pendant 3 secondes
+                    if (analysis.prediction) {
+                        updateStatus(`🔮 ${analysis.prediction}`);
+                        
+                        // Puis afficher le status normal après 3 secondes
+                        setTimeout(() => {
+                            updateStatus();
+                            refreshProbabilityHints();
+                            // Si c'est au tour de l'IA de jouer
+                            if (gameMode === 'pvai' && currentPlayer !== humanPlayer) {
+                                setTimeout(() => playAIMove(), 600);
+                            } else if (gameMode === 'aivai') {
+                                setTimeout(() => playAIVsAITurn(), 600);
+                            }
+                        }, 3000);
                     }
                 }
             } catch(e) { console.error(e); }
